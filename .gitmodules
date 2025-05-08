@@ -1,0 +1,3 @@
+[submodule "trace_generator"]
+	path = trace_generator
+	url = https://github.com/jhk5361/trace_generator
