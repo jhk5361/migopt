@@ -28,8 +28,8 @@ void an_add_trace(struct trace_req &t) {
 void init_an(struct sim_cfg &scfg) {
 	my_an = new struct an;
 	my_an->nr_tiers = scfg.nr_tiers;
-	my_an->mig_period = scfg.mcmf_period;
-	my_an->mig_traffic = scfg.mcmf_mig_traffic == -1 ? 1000 : scfg.mcmf_mig_traffic;
+	my_an->mig_period = scfg.mig_period;
+	my_an->mig_traffic = scfg.mig_traffic == -1 ? 1000 : scfg.mig_traffic;
 	my_an->mode = scfg.do_an;
 	my_an->sched_file = scfg.sched_file;
 

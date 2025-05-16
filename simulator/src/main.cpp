@@ -101,6 +101,55 @@ void print_stat () {
 
 }
 
+void print_conf(struct sim_cfg &scfg) {
+	// Print the configuration all settings in readable formats
+	cout << "Configuration:" << endl;
+	cout << "Trace File: " << scfg.trace_file << endl;
+	cout << "Sampled File: " << scfg.sampled_file << endl;
+	cout << "Sched File: " << scfg.sched_file << endl;
+	cout << "Number of Original Pages: " << scfg.nr_org_pages << endl;
+	cout << "Number of Original Traces: " << scfg.nr_org_traces << endl;
+	cout << "Trace Sampling Ratio: " << scfg.trace_sampling_ratio << endl;
+	cout << "Number of Sampled Pages: " << scfg.nr_sampled_pages << endl;
+	cout << "Number of Sampled Traces: " << scfg.nr_sampled_traces << endl;
+	cout << "Number of Tiers: " << scfg.nr_tiers << endl;
+	cout << "Tier Capacity Scale: " << scfg.tier_cap_scale << endl;
+	cout << "Tier Capacity Ratio: ";
+	for (int i = 0; i < scfg.nr_tiers; i++) {
+		cout << scfg.tier_cap_ratio[i] << " ";
+	}
+	cout << endl;
+	cout << "Tier Load Latencies: ";
+	for (int i = 0; i < scfg.nr_tiers; i++) {
+		cout << scfg.lat_loads[i] << " ";
+	}
+	cout << endl;
+	cout << "Tier Store Latencies: ";
+	for (int i = 0; i < scfg.nr_tiers; i++) {
+		cout << scfg.lat_stores[i] << " ";
+	}
+	cout << endl;
+	cout << "Tier 4KB Read Latencies: ";
+	for (int i = 0; i < scfg.nr_tiers; i++) {
+		cout << scfg.lat_4KB_reads[i] << " ";
+	}
+	cout << endl;
+	cout << "Tier 4KB Write Latencies: ";
+	for (int i = 0; i < scfg.nr_tiers; i++) {
+		cout << scfg.lat_4KB_writes[i] << " ";
+	}
+	cout << endl;
+	cout << "Migration Period: " << scfg.mig_period << endl;
+	cout << "Migration Traffic: " << scfg.mig_traffic << endl;
+	cout << "Migration Overhead: " << scfg.mig_overhead << endl;
+	cout << "Do AutoNUMA: " << scfg.do_an << endl;
+	cout << "Do AutoTiering: " << scfg.do_at << endl;
+	cout << "Do MTM: " << scfg.do_mtm << endl;
+	cout << "Do MigOpt: " << scfg.do_migopt << endl;
+	cout << "Do Analysis: " << scfg.do_analysis << endl;
+
+
+}
 
 void get_sim_conf(cost char *cfg_file, struct sim_cfg &scfg) {
 	config_t cfg;
@@ -121,185 +170,111 @@ void get_sim_conf(cost char *cfg_file, struct sim_cfg &scfg) {
 
 	if(config_lookup_string(&cfg, "trace_file", &str))
 		memcpy(scfg.trace_file, str, strlen(str));
-
+	if (config_lookup_int64(&cfg, "trace_sampling_ratio", &intval))
+		scfg.trace_sampling_ratio = intval;
 	if(config_lookup_string(&cfg, "sched_file", &str))
 		memcpy(scfg.sched_file, str, strlen(str));
 
-	if(config_lookup_int64(&cfg, "nr_pages", &int64val))
-		scfg.nr_pages = int64val;
+	snprintf(scfg.sampled_file, sizeof(scfg.sampled_file), "%s.ratio%d.sampled", scfg.trace_file, scfg.trace_sampling_ratio);
 
-	if(config_lookup_int(&cfg, "nr_traces", &intval))
-		scfg.nr_traces = intval;
+	if(config_lookup_int64(&cfg, "nr_org_pages", &int64val))
+		scfg.nr_org_pages = int64val;
+	if(config_lookup_int64(&cfg, "nr_org_traces", &int64val))
+		scfg.nr_org_traces = int64val;
+	if(config_lookup_int64(&cfg, "nr_sampled_pages", &int64val))
+		scfg.nr_sampled_pages = int64val;
+	if(config_lookup_int64(&cfg, "nr_sampled_traces", &int64val))
+		scfg.nr_sampled_traces = int64val;
 
+
+	// get tier info (nr_tiers, tier_cap_scale, tier_cap_ratio, and latencies)
 	if(config_lookup_int(&cfg, "nr_tiers", &intval))
 		scfg.nr_tiers = intval;
-
-	if(config_lookup_int(&cfg, "bar_ratio", &intval))
-		scfg.bar_ratio = intval;
-
-	if(config_lookup_int(&cfg, "nr_access_bits", &intval))
-		scfg.nr_access_bits = intval;
-
-	if(config_lookup_int(&cfg, "mpol", &intval))
-		scfg.mpol = intval;
-
-	if(config_lookup_int(&cfg, "alloc_id", &intval))
-		scfg.alloc_id = intval;
-
-	if(config_lookup_int(&cfg, "mcmf_type", &intval))
-		scfg.mcmf_type = intval;
-
-	if(config_lookup_int(&cfg, "mcmf", &intval))
-		scfg.mcmf = intval;
-
-	if(config_lookup_int(&cfg, "trace_sample", &intval))
-		scfg.trace_sample = intval;
-
-	if(config_lookup_int(&cfg, "do_analysis", &intval))
-		scfg.do_analysis = intval;
-
-	if(config_lookup_int(&cfg, "do_mtm", &intval))
-		scfg.do_mtm = intval;
-
-	if(config_lookup_int(&cfg, "do_an", &intval))
-		scfg.do_an = intval;
-
-	if(config_lookup_int(&cfg, "do_at", &intval))
-		scfg.do_at = intval;
-
-	if(config_lookup_int(&cfg, "mcmf_period", &intval))
-		scfg.mcmf_period = intval;
-
-	if(config_lookup_int(&cfg, "mcmf_mig_traffic", &intval))
-		scfg.mcmf_mig_traffic = intval;
-
-	if(config_lookup_int(&cfg, "mon_pol", &intval))
-		scfg.mon_pol = intval;
-
-	if(config_lookup_int(&cfg, "mon_hot_threshold", &intval))
-		scfg.mon_hot_threshold = intval;
-
-	if(config_lookup_int(&cfg, "mon_rate", &intval))
-		scfg.mon_rate = intval;
-
-	if(config_lookup_int(&cfg, "mig_pol", &intval))
-		scfg.mig_pol = intval;
-
-	if(config_lookup_int(&cfg, "mig_rate", &intval))
-		scfg.mig_rate = intval;
-
-	if(config_lookup_int(&cfg, "mig_traffic_rate", &intval))
-		scfg.mig_traffic_rate = intval;
-
-
-	if(config_lookup_int(&cfg, "mig_overhead", &intval))
-		scfg.mig_overhead = intval;
-
-	setting = config_lookup(&cfg, "ratio");
+	if(config_lookup_int(&cfg, "tier_cap_scale", &intval))
+		scfg.tier_cap_scale = intval;
+	setting = config_lookup(&cfg, "tier_cap_ratio");
 	if (setting != NULL) {
 		int count = config_setting_length(setting);
 		if (scfg.nr_tiers != count) {
-			printf("ratio's count is not equall to nr_tiers!\n");
+			printf("tier_cap_ratio's count is not equall to nr_tiers!\n");
 			abort();
 		}
 		for (int i = 0; i < count; i++) {
 			config_setting_t *ratio = config_setting_get_elem(setting, i); 
-			scfg.ratio[i] =  config_setting_get_int(ratio);
+			scfg.tier_cap_ratio[i] =  config_setting_get_int(ratio);
 		}
 	}
-
-	setting = config_lookup(&cfg, "lat_loads");
+	setting = config_lookup(&cfg, "tier_lat_loads");
 	if (setting != NULL) {
 		int count = config_setting_length(setting);
 		if (scfg.nr_tiers != count) {
-			printf("lat_loads's count is not equall to nr_tiers!\n");
+			printf("tier_lat_loads's count is not equall to nr_tiers!\n");
 			abort();
 		}
 		for (int i = 0; i < count; i++) {
 			config_setting_t *lat = config_setting_get_elem(setting, i); 
-			scfg.lat_loads[i] = config_setting_get_int(lat);
+			scfg.lat_loads[i] =  config_setting_get_int(lat);
 		}
 	}
-
-	setting = config_lookup(&cfg, "lat_stores");
+	setting = config_lookup(&cfg, "tier_lat_stores");
 	if (setting != NULL) {
 		int count = config_setting_length(setting);
 		if (scfg.nr_tiers != count) {
-			printf("lat_stores's count is not equall to nr_tiers!\n");
+			printf("tier_lat_stores's count is not equall to nr_tiers!\n");
 			abort();
 		}
 		for (int i = 0; i < count; i++) {
 			config_setting_t *lat = config_setting_get_elem(setting, i); 
-			scfg.lat_stores[i] = config_setting_get_int(lat);
+			scfg.lat_stores[i] =  config_setting_get_int(lat);
 		}
 	}
-
-	setting = config_lookup(&cfg, "lat_4KB_reads");
+	setting = config_lookup(&cfg, "tier_lat_4KB_reads");
 	if (setting != NULL) {
 		int count = config_setting_length(setting);
 		if (scfg.nr_tiers != count) {
-			printf("lat_4KB_reads's count is not equall to nr_tiers!\n");
+			printf("tier_lat_4KB_reads's count is not equall to nr_tiers!\n");
 			abort();
 		}
 		for (int i = 0; i < count; i++) {
 			config_setting_t *lat = config_setting_get_elem(setting, i); 
-			scfg.lat_4KB_reads[i] = config_setting_get_int(lat) * scfg.mig_overhead / 10000;
+			scfg.lat_4KB_reads[i] =  config_setting_get_int(lat);
 		}
 	}
-
-	setting = config_lookup(&cfg, "lat_4KB_writes");
+	setting = config_lookup(&cfg, "tier_lat_4KB_writes");
 	if (setting != NULL) {
 		int count = config_setting_length(setting);
 		if (scfg.nr_tiers != count) {
-			printf("lat_4KB_writes's count is not equall to nr_tiers!\n");
+			printf("tier_lat_4KB_writes's count is not equall to nr_tiers!\n");
 			abort();
 		}
 		for (int i = 0; i < count; i++) {
 			config_setting_t *lat = config_setting_get_elem(setting, i); 
-			scfg.lat_4KB_writes[i] = config_setting_get_int(lat) * scfg.mig_overhead / 10000;
+			scfg.lat_4KB_writes[i] =  config_setting_get_int(lat);
 		}
 	}
 
-	printf("-----------------------------\nconfiguration\n");
-	printf("\rtrace_file: %s\n \
-			\rnr_pages: %lu\n \
-			\rnr_traces: %d\n \
-			\rnr_tiers: %d\n \
-			\rmig_period: %d\n \
-			\rmig_traffic: %d\n \
-			\rmig_overhead: %d\n \
-			\rsample_rate: %d\n \
-			\rdo_an: %d\n \
-			\rdo_at: %d\n \
-			\rdo_mtm: %d\n \
-			\rmpol: %d\n",
-			scfg.trace_file,
-			scfg.nr_pages,
-			scfg.nr_traces,
-			scfg.nr_tiers,
-			scfg.mcmf_period,
-			scfg.mcmf_mig_traffic,
-			scfg.mig_overhead,
-			scfg.trace_sample,
-			scfg.do_an,
-			scfg.do_at,
-			scfg.do_mtm,
-			scfg.mpol);
-	printf("ratio: ");
-	for (int i = 0; i < scfg.nr_tiers; i++) {
-			printf("%d ", scfg.ratio[i]);
-	}
-	printf("\n");
+	// get mig_period, mig_traffic, and mig_overhead
+	if(config_lookup_int(&cfg, "mig_period", &intval))
+		scfg.mig_period = intval;
+	if(config_lookup_int(&cfg, "mig_traffic", &intval))
+		scfg.mig_traffic = intval;
+	if(config_lookup_int(&cfg, "mig_overhead", &intval))
+		scfg.mig_overhead = intval;
 
-	printf("lat_4KB_reads, lat_4KB_writes: ");
-	for (int i = 0; i < scfg.nr_tiers; i++) {
-			printf("%d,%d ", scfg.lat_4KB_reads[i], scfg.lat_4KB_writes[i]);
-	}
-	printf("\n");
+	// get simulating actions (e.g., do_an, do_at, do_mtm)
+	if(config_lookup_int(&cfg, "do_an", &intval))
+		scfg.do_an = intval;
+	if(config_lookup_int(&cfg, "do_at", &intval))
+		scfg.do_at = intval;
+	if(config_lookup_int(&cfg, "do_mtm", &intval))
+		scfg.do_mtm = intval;
+	if(config_lookup_int(&cfg, "do_migopt", &intval))
+		scfg.do_migopt = intval;
+	if(config_lookup_int(&cfg, "do_analysis", &intval))
+		scfg.do_analysis = intval;
 
 
-
-	printf("-----------------------------\n");
+	print_conf(scfg);
 }
 
 static bool get_hash(uint64_t addr, uint64_t sample) {
@@ -315,15 +290,66 @@ static bool get_hash(uint64_t addr, uint64_t sample) {
 	return false;
 }
 
-static int do_sample_trace(vector<struct trace_req> &traces, struct sim_cfg &scfg, struct sim_stat &sstat) {
+static bool need_to_read_org_trace(struct sim_cfg &scfg) {
+	// Check if the sampled file exists and is not empty
+	// If it exists, we don't need to read the trace again
+	ifstream infile(scfg.sampled_file);
+	if (infile.good()) {
+		infile.seekg(0, ios::end);
+		if (infile.tellg() > 0) {
+			return false; // File exists and is not empty
+		}
+	}
+
+	// If the file doesn't exist or is empty, we need to read the trace
+	return true;
+}
+
+static void read_sampled_trace(vector<struct trace_req> &traces, struct sim_cfg &scfg) {
+	ifstream infile(scfg.sampled_file);
+	if (!infile.is_open()) {
+		cerr << "Error opening sampled trace file: " << scfg.sampled_file << endl;
+		return;
+	}
+
+	string line;
+	while (getline(infile, line)) {
+		struct trace_req treq = get_trace_req(line);
+		traces.push_back(treq);
+	}
+	infile.close();
+}
+
+static int read_trace(vector<struct trace_req> &traces, struct sim_cfg &scfg, struct sim_stat &sstat) {
 	unordered_set<uint64_t> org_pages, sampled_pages;
 	struct trace_req treq = {0};
-	ifstream input_file(scfg.trace_file);
 	uint64_t lines = 0;
 
+	// Check if we need to read the trace file
+	if (!need_to_read_org_trace(scfg)) {
+		cout << "Sampled trace file already exists. No need to read the trace file again." << endl;
+		return 0;
+	}
+
+
+	ifstream input_file(scfg.trace_file);
+	if (!input_file.is_open()) {
+		cerr << "Error opening trace file: " << scfg.trace_file << endl;
+		return -1;
+	}
+
+
+	// Open the sampled trace file for writing
+	ofstream sampled_file(scfg.sampled_file);
+	if (!sampled_file.is_open()) {
+		cerr << "Error opening sampled trace file: " << scfg.sampled_file << endl;
+		input_file.close();
+		return -1;
+	}
 
 	// Do sampling with trace sampling ratio
 	// and get the number of original/sampled pages and the number of original/sampled traces
+	// and write the sampled trace to the file
 	while (getline(input_file, cur_str)) {
 		if ((++lines % 100000) == 0){
 			fprintf(stderr, "\r%lu processed...", lines);
@@ -342,25 +368,30 @@ static int do_sample_trace(vector<struct trace_req> &traces, struct sim_cfg &scf
 					sstat.nr_sampled_traces[treq.rtype]++;
 					sstat.nr_sampled_traces[TOTAL]++;
 					sampled_traces.push_back(treq);
+					// Write the sampled trace to the file
+					sampled_file << cur_str << endl;
 				}
 				break;
 			default:
 				break;
 		}
-
-		scfg.nr_org_pages = org_pages.size();
-		scfg.nr_org_traces = sstat.nr_sampled_traces[TOTAL];
-		scfg.nr_sampled_pages = sampled_pages.size();
-		scfg.nr_sampled_traces = sstat.nr_sampled_traces[TOTAL];
-
-		lines = 0;
-		input_file.clear();
-		input_file.seekg(0);
 	}
+	scfg.nr_org_pages = org_pages.size();
+	scfg.nr_org_traces = sstat.nr_sampled_traces[TOTAL];
+	scfg.nr_sampled_pages = sampled_pages.size();
+	scfg.nr_sampled_traces = sstat.nr_sampled_traces[TOTAL];
+
+	input_file.clear();
+	input_file.seekg(0);
+	input_file.close();
+
+	// flush the sampled trace file
+	sampled_file.flush();
+	sampled_file.close();
 }
 
 // Initialize the simulators
-void init_simulators(struct sim_cfg &scfg) {
+void init_sim(struct sim_cfg &scfg) {
 	// Set the capacity of each tier
 	// total_cap is scfg.nr_sampled_pages * scfg.tier_cap_scale / 100;
 	int total_cap = scfg.nr_sampled_pages * scfg.tier_cap_scale / 100;
@@ -394,7 +425,7 @@ void process_trace(struct trace_req &trace, struct sim_cfg &scfg) {
 }
 
 // Do simulation
-void do_sim(vector<struct trace_req> &traces, struct sim_cfg &scfg, struct sim_stat &sstat) {
+void do_sim(vector<struct trace_req> &traces, struct sim_cfg &scfg) {
 	// Process each trace request
 	for (auto &trace : traces) {
 		process_trace(trace, scfg);
@@ -406,6 +437,24 @@ void do_sim(vector<struct trace_req> &traces, struct sim_cfg &scfg, struct sim_s
 		do_at(scfg);
 	if (scfg.do_mtm)
 		do_mtm(scfg);
+}
+
+void destroy_sim(struct sim_cfg &scfg) {
+	if (scfg.do_an)
+		destroy_an();
+	if (scfg.do_at)
+		destroy_at();
+	if (scfg.do_mtm)
+		destroy_mtm();
+}
+
+void print_sim(struct sim_stat &sstat) {
+	// Print the simulation statistics
+	cout << "Simulation Statistics:" << endl;
+	cout << "Original Traces: " << sstat.nr_org_traces[TOTAL] << endl;
+	cout << "Sampled Traces: " << sstat.nr_sampled_traces[TOTAL] << endl;
+	cout << "Original Pages: " << sstat.nr_org_pages << endl;
+	cout << "Sampled Pages: " << sstat.nr_sampled_pages << endl;
 }
 
 int main(int argc, char **argv) {
@@ -425,18 +474,15 @@ int main(int argc, char **argv) {
 	uint64_t cur_time = 1;
 
 	vector<struct trace_req> sampled_traces;
-	do_sample_trace(sampled_traces, scfg, sstat);
+	read_trace(sampled_traces, scfg, sstat);
 
 	init_sim(scfg);
 
-	do_sim(sampled_traces, scfg, sstat);
+	do_sim(sampled_traces, scfg);
 
 	destroy_sim(scfg);
 
-	for (int i = 0; i < scfg.nr_sampled_traces; i++) {
-
-	}
-
+#if 0
 	if (scfg.nr_pages > 0) {
 		scfg.mcmf = scfg.nr_traces;
 		if (scfg.mcmf_period == -1) scfg.mcmf_period = scfg.mig_rate * scfg.trace_sample / TRACE_SAMPLE;
@@ -487,20 +533,12 @@ int main(int argc, char **argv) {
 		}
 	}
 
-	//init_pa_inf(scfg.nr_pages * (100 + scfg.mig_traffic_rate) / 100, scfg.ratio, scfg.nr_tiers, scfg.mpol, scfg.promo_target, scfg.demo_target, scfg.nr_access_bits, scfg.nr_cache_pages, scfg.lat_loads, scfg.lat_stores, scfg.lat_4KB_reads, scfg.lat_4KB_writes, scfg.alloc_id);
-	init_pa_inf(scfg.nr_pages, scfg.ratio, scfg.nr_tiers, scfg.mpol, scfg.promo_target, scfg.demo_target, scfg.nr_access_bits, scfg.nr_cache_pages, scfg.lat_loads, scfg.lat_stores, scfg.lat_4KB_reads, scfg.lat_4KB_writes, scfg.alloc_id);
-	init_monitor(scfg.mon_pol, scfg.mon_rate, scfg.mon_hot_threshold);
-	init_migrator(scfg.mig_pol, scfg.mig_rate, scfg.mig_traffic_rate);
-
-
 	if (scfg.mcmf_type != -1 && scfg.mcmf)
 		if (scfg.mcmf_type == MCMF_MIGOPT) {
 			init_migopt (scfg.mcmf_type, scfg.mcmf, scfg.mcmf_period, scfg.mcmf_mig_traffic, scfg.nr_tiers, scfg.nr_cache_pages, scfg.lat_loads, scfg.lat_stores, scfg.lat_4KB_reads, scfg.lat_4KB_writes, scfg.sched_file); // for testing
 		} else {
 			init_chopt (scfg.mcmf_type, scfg.mcmf, scfg.nr_tiers, scfg.nr_cache_pages, scfg.lat_loads, scfg.lat_stores, scfg.lat_4KB_reads, scfg.lat_4KB_writes); // for testing
 		}
-
-	vector<vector<uint64_t>> mcmf_mig(scfg.nr_tiers, vector<uint64_t>(scfg.nr_tiers, 0));
 
 	if (scfg.do_analysis > 0) {
 		printf("nr_trace: %d\n", scfg.nr_traces);
@@ -594,16 +632,7 @@ int main(int argc, char **argv) {
 
 	cout << endl;
 	print_stat();
+#endif
 	
-	printf("mcmf mig\n");
-	for (int i = 0; i < mcmf_mig.size(); i++) {
-		for (int j = 0; j < mcmf_mig[i].size(); j++) {
-			printf("%ld ", mcmf_mig[i][j]);
-		}
-		printf("\n");
-	}
-
-	destroy_belady();
-	destroy_pa_inf();
 	return 0;
 }

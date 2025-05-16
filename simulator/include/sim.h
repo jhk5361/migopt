@@ -36,37 +36,45 @@
 #define MAX_NR_TIERS 4
 
 struct sim_cfg {
-	char trace_file[200];
-	char alloc_file[200];
+	char trace_file[200]; // input trace file
+	char sampled_file[200]; // sampled trace file
+	char sched_file[200]; // output schedule file
 
-	uint64_t nr_org_pages;
-	uint64_t nr_org_traces;
-	uint64_t nr_sampled_pages;
-	uint64_t nr_sampled_traces;
+	uint64_t nr_org_pages; // number of original pages
+	uint64_t nr_org_traces; // number of original traces
+	int trace_sampling_ratio; // 10000: 100%
+	uint64_t nr_sampled_pages; // number of sampled pages
+	uint64_t nr_sampled_traces; // number of sampled traces
 
-	int nr_tiers;
-	int tier_cap_scale;
-	int tier_cap_ratio[MAX_NR_TIERS];
-	int tier_cap[MAX_NR_TIERS];
+	int nr_tiers; // number of tiers
+	int tier_cap_scale; // total cap = nr_sampled_pages * tier_cap_scale / 100
+	int tier_cap_ratio[MAX_NR_TIERS]; // ratio of each tier
+	int tier_cap[MAX_NR_TIERS]; // cap of each tier
 
-	int trace_sampling_ratio;
-	int do_analysis;
-	int do_mtm;
-	int do_an;
-	int do_at;
-	int mig_overhead;
+	int tier_lat_loads[MAX_NR_TIERS]; // latency of loads
+	int tier_lat_stores[MAX_NR_TIERS]; // latency of stores
+	int tier_lat_4KB_reads[MAX_NR_TIERS]; // latency of 4KB reads
+	int tier_lat_4KB_writes[MAX_NR_TIERS]; // latency of 4KB writes
 
-	int bar_ratio;
+	int mig_period; // migration period
+	int mig_traffic; // migration traffic
+	int mig_overhead; // 10000: 100%
 
+	int do_an; // 0: do not AutoNUMA, 1: do Balanced AutoNUMA, 2: do Tiered AutoNUMA, 3: do No Migration
+	int do_at; // 0: do not AutoTiering, 1: do AutoTiering
+	int do_mtm; // 0: do not MTM, 1: do default MTM, 2: do prioritized MTM
+
+	int do_migopt; // 0: do not MigOpt, 1: do MigOpt
+
+	int do_analysis; // 0: do not analysis, 1: do analysis
+
+
+	/*
 	int mcmf_type;
 	int mcmf;
 	int mcmf_period;
 	int mcmf_mig_traffic;
-
-	int lat_loads[MAX_NR_TIERS];
-	int lat_stores[MAX_NR_TIERS];
-	int lat_4KB_reads[MAX_NR_TIERS];
-	int lat_4KB_writes[MAX_NR_TIERS];
+	*/
 };
 
 
