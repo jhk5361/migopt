@@ -51,3 +51,4 @@ CMakeUserPresets.json
 modules.order
 *.ko
 
+.vscode/
