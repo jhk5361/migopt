@@ -52,4 +52,4 @@ modules.order
 *.ko
 
 .vscode/
-./build
+./simulator/build
