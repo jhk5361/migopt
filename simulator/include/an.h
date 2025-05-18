@@ -57,10 +57,10 @@ struct an {
 	int mig_period;
 	int nr_period;
 	int mode;
-	int lat_loads[MAX_NR_TIERS];
-	int lat_stores[MAX_NR_TIERS];
-	int lat_4KB_reads[MAX_NR_TIERS];
-	int lat_4KB_writes[MAX_NR_TIERS];
+	int tier_lat_loads[MAX_NR_TIERS];
+	int tier_lat_stores[MAX_NR_TIERS];
+	int tier_lat_4KB_reads[MAX_NR_TIERS];
+	int tier_lat_4KB_writes[MAX_NR_TIERS];
 	char *sched_file;
 
 

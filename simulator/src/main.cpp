@@ -1,5 +1,4 @@
 #include <iostream>
-#include <thread>
 #include <random>
 #include <limits>
 #include <time.h>
@@ -16,30 +15,24 @@
 #include <cstring>
 #include <iomanip>
 #include <algorithm>
-#include <unordered_map>
+#include <unordered_set>
 #include <libconfig.h>
 #include "sim.h"
-#include "mem.h"
-#include "monitor.h"
-#include "migrator.h"
-#include "tier.h"
-#include "belady.h"
-#include "mcmf.h" // for testing
-#include "analysis.h"
-#include "mtm.h"
+//#include "mcmf.h" // for testing
+//#include "analysis.h"
+//#include "mtm.h"
 #include "an.h"
-#include "at.h"
+//include "at.h"
 using namespace std;
 
 
-enum req_type get_type(string &str) {
+enum trace_type get_type(string &str) {
 	string sub_str = str.substr(0,10);
 	if (sub_str[0] == 'R') {
 		return LOAD;
 	} else if (sub_str[0] == 'W') {
 		return STORE;
 	}
-	abort();
 	return OTHERS;
 }
 
@@ -59,10 +52,7 @@ static inline struct trace_req get_trace_req(string &str) {
 	return treq;
 }
 
-void print_mem_req (struct mem_req &mreq) {
-	cout << "MEM TYPE: " << mreq.type << ", VADDR: " << mreq.vaddr << ", PADDR: " << mreq.paddr << endl;
-}
-
+/*
 void print_stat () {
 	// Use setw to format the output into aligned columns for "TOTAL", "LOAD", and "STORE".
 	cout << setw(20) << "TOTAL" << setw(10)<< "LOAD" << setw(10) << "STORE" << endl;
@@ -97,9 +87,8 @@ void print_stat () {
 	lat_total = (lat_load + lat_store + lat_alloc) / 1000 / 1000 / 1000;
 	throughput = (tstat.nr_trace[LOAD] + tstat.nr_trace[STORE]) / lat_total;
 	printf("Throughput w/o migration (instructions per second): %.2f\n", throughput);
-
-
 }
+*/
 
 void print_conf(struct sim_cfg &scfg) {
 	// Print the configuration all settings in readable formats
@@ -119,24 +108,30 @@ void print_conf(struct sim_cfg &scfg) {
 		cout << scfg.tier_cap_ratio[i] << " ";
 	}
 	cout << endl;
+	cout << "Total Capacity: " << scfg.total_cap << endl;
+	cout << "Tier Capacities: ";
+	for (int i = 0; i < scfg.nr_tiers; i++) {
+		cout << scfg.tier_cap[i] << " ";
+	}
+	cout << endl;
 	cout << "Tier Load Latencies: ";
 	for (int i = 0; i < scfg.nr_tiers; i++) {
-		cout << scfg.lat_loads[i] << " ";
+		cout << scfg.tier_lat_loads[i] << " ";
 	}
 	cout << endl;
 	cout << "Tier Store Latencies: ";
 	for (int i = 0; i < scfg.nr_tiers; i++) {
-		cout << scfg.lat_stores[i] << " ";
+		cout << scfg.tier_lat_stores[i] << " ";
 	}
 	cout << endl;
 	cout << "Tier 4KB Read Latencies: ";
 	for (int i = 0; i < scfg.nr_tiers; i++) {
-		cout << scfg.lat_4KB_reads[i] << " ";
+		cout << scfg.tier_lat_4KB_reads[i] << " ";
 	}
 	cout << endl;
 	cout << "Tier 4KB Write Latencies: ";
 	for (int i = 0; i < scfg.nr_tiers; i++) {
-		cout << scfg.lat_4KB_writes[i] << " ";
+		cout << scfg.tier_lat_4KB_writes[i] << " ";
 	}
 	cout << endl;
 	cout << "Migration Period: " << scfg.mig_period << endl;
@@ -147,11 +142,9 @@ void print_conf(struct sim_cfg &scfg) {
 	cout << "Do MTM: " << scfg.do_mtm << endl;
 	cout << "Do MigOpt: " << scfg.do_migopt << endl;
 	cout << "Do Analysis: " << scfg.do_analysis << endl;
-
-
 }
 
-void get_sim_conf(cost char *cfg_file, struct sim_cfg &scfg) {
+void get_sim_conf(const char *cfg_file, struct sim_cfg &scfg) {
 	config_t cfg;
 	config_setting_t *setting;
 	int intval;
@@ -170,21 +163,31 @@ void get_sim_conf(cost char *cfg_file, struct sim_cfg &scfg) {
 
 	if(config_lookup_string(&cfg, "trace_file", &str))
 		memcpy(scfg.trace_file, str, strlen(str));
-	if (config_lookup_int64(&cfg, "trace_sampling_ratio", &intval))
+	if (config_lookup_int(&cfg, "trace_sampling_ratio", &intval))
 		scfg.trace_sampling_ratio = intval;
 	if(config_lookup_string(&cfg, "sched_file", &str))
 		memcpy(scfg.sched_file, str, strlen(str));
 
-	snprintf(scfg.sampled_file, sizeof(scfg.sampled_file), "%s.ratio%d.sampled", scfg.trace_file, scfg.trace_sampling_ratio);
+	string dot_removed_file_str = scfg.trace_file;
+	// Remove the file extension (.) from the trace file name
+	size_t last_dot = dot_removed_file_str.find_last_of(".");
+	if (last_dot != string::npos) {
+		dot_removed_file_str = dot_removed_file_str.substr(0, last_dot);
+	}
 
-	if(config_lookup_int64(&cfg, "nr_org_pages", &int64val))
-		scfg.nr_org_pages = int64val;
-	if(config_lookup_int64(&cfg, "nr_org_traces", &int64val))
-		scfg.nr_org_traces = int64val;
-	if(config_lookup_int64(&cfg, "nr_sampled_pages", &int64val))
-		scfg.nr_sampled_pages = int64val;
-	if(config_lookup_int64(&cfg, "nr_sampled_traces", &int64val))
-		scfg.nr_sampled_traces = int64val;
+	string after_slash_file_str = dot_removed_file_str.substr(dot_removed_file_str.find_last_of("/")+1);
+
+	// Append the sampling ratio to the file name
+	// and add the ".sampled" extension
+	// Append the ".sched" extension to the sched file name
+	string sampled_file_str, sched_file_str;
+	sampled_file_str = dot_removed_file_str + ".ratio" + to_string(scfg.trace_sampling_ratio) + ".sampled";
+	//sched_file_str = dot_removed_file_str + ".ratio" + to_string(scfg.trace_sampling_ratio) + ".sched";
+	sched_file_str = "./result/" + after_slash_file_str + ".ratio" + to_string(scfg.trace_sampling_ratio);
+
+	// copy the sampled file name and sched file name to the scfg
+	memcpy(scfg.sampled_file, sampled_file_str.c_str(), sampled_file_str.length() + 1);
+	memcpy(scfg.sched_file, sched_file_str.c_str(), sched_file_str.length() + 1);
 
 
 	// get tier info (nr_tiers, tier_cap_scale, tier_cap_ratio, and latencies)
@@ -204,6 +207,7 @@ void get_sim_conf(cost char *cfg_file, struct sim_cfg &scfg) {
 			scfg.tier_cap_ratio[i] =  config_setting_get_int(ratio);
 		}
 	}
+
 	setting = config_lookup(&cfg, "tier_lat_loads");
 	if (setting != NULL) {
 		int count = config_setting_length(setting);
@@ -213,7 +217,7 @@ void get_sim_conf(cost char *cfg_file, struct sim_cfg &scfg) {
 		}
 		for (int i = 0; i < count; i++) {
 			config_setting_t *lat = config_setting_get_elem(setting, i); 
-			scfg.lat_loads[i] =  config_setting_get_int(lat);
+			scfg.tier_lat_loads[i] =  config_setting_get_int(lat);
 		}
 	}
 	setting = config_lookup(&cfg, "tier_lat_stores");
@@ -225,7 +229,7 @@ void get_sim_conf(cost char *cfg_file, struct sim_cfg &scfg) {
 		}
 		for (int i = 0; i < count; i++) {
 			config_setting_t *lat = config_setting_get_elem(setting, i); 
-			scfg.lat_stores[i] =  config_setting_get_int(lat);
+			scfg.tier_lat_stores[i] =  config_setting_get_int(lat);
 		}
 	}
 	setting = config_lookup(&cfg, "tier_lat_4KB_reads");
@@ -237,7 +241,7 @@ void get_sim_conf(cost char *cfg_file, struct sim_cfg &scfg) {
 		}
 		for (int i = 0; i < count; i++) {
 			config_setting_t *lat = config_setting_get_elem(setting, i); 
-			scfg.lat_4KB_reads[i] =  config_setting_get_int(lat);
+			scfg.tier_lat_4KB_reads[i] =  config_setting_get_int(lat);
 		}
 	}
 	setting = config_lookup(&cfg, "tier_lat_4KB_writes");
@@ -249,7 +253,7 @@ void get_sim_conf(cost char *cfg_file, struct sim_cfg &scfg) {
 		}
 		for (int i = 0; i < count; i++) {
 			config_setting_t *lat = config_setting_get_elem(setting, i); 
-			scfg.lat_4KB_writes[i] =  config_setting_get_int(lat);
+			scfg.tier_lat_4KB_writes[i] =  config_setting_get_int(lat);
 		}
 	}
 
@@ -272,9 +276,6 @@ void get_sim_conf(cost char *cfg_file, struct sim_cfg &scfg) {
 		scfg.do_migopt = intval;
 	if(config_lookup_int(&cfg, "do_analysis", &intval))
 		scfg.do_analysis = intval;
-
-
-	print_conf(scfg);
 }
 
 static bool get_hash(uint64_t addr, uint64_t sample) {
@@ -305,39 +306,47 @@ static bool need_to_read_org_trace(struct sim_cfg &scfg) {
 	return true;
 }
 
-static void read_sampled_trace(vector<struct trace_req> &traces, struct sim_cfg &scfg) {
+static int read_sampled_trace(vector<struct trace_req> &traces, struct sim_cfg &scfg, struct sim_stat &sstat) {
+	unordered_set<uint64_t> sampled_pages;
 	ifstream infile(scfg.sampled_file);
 	if (!infile.is_open()) {
 		cerr << "Error opening sampled trace file: " << scfg.sampled_file << endl;
-		return;
+		return -1;
 	}
 
 	string line;
 	while (getline(infile, line)) {
 		struct trace_req treq = get_trace_req(line);
-		traces.push_back(treq);
+		switch (treq.type) {
+			case LOAD:
+			case STORE:
+				sampled_pages.insert(treq.addr);
+				sstat.nr_sampled_traces[treq.type]++;
+				sstat.nr_sampled_traces[TOTAL]++;
+				traces.push_back(treq);
+				break;
+			default:
+				break;
+		}
 	}
+
+	scfg.nr_sampled_pages = sampled_pages.size();
+	scfg.nr_sampled_traces = sstat.nr_sampled_traces[TOTAL];
+
 	infile.close();
+	return 0;
 }
 
-static int read_trace(vector<struct trace_req> &traces, struct sim_cfg &scfg, struct sim_stat &sstat) {
+static int read_org_trace(vector<struct trace_req> &traces, struct sim_cfg &scfg, struct sim_stat &sstat) {
 	unordered_set<uint64_t> org_pages, sampled_pages;
 	struct trace_req treq = {0};
 	uint64_t lines = 0;
-
-	// Check if we need to read the trace file
-	if (!need_to_read_org_trace(scfg)) {
-		cout << "Sampled trace file already exists. No need to read the trace file again." << endl;
-		return 0;
-	}
-
-
+	
 	ifstream input_file(scfg.trace_file);
 	if (!input_file.is_open()) {
 		cerr << "Error opening trace file: " << scfg.trace_file << endl;
 		return -1;
 	}
-
 
 	// Open the sampled trace file for writing
 	ofstream sampled_file(scfg.sampled_file);
@@ -350,6 +359,7 @@ static int read_trace(vector<struct trace_req> &traces, struct sim_cfg &scfg, st
 	// Do sampling with trace sampling ratio
 	// and get the number of original/sampled pages and the number of original/sampled traces
 	// and write the sampled trace to the file
+	string cur_str;
 	while (getline(input_file, cur_str)) {
 		if ((++lines % 100000) == 0){
 			fprintf(stderr, "\r%lu processed...", lines);
@@ -365,9 +375,9 @@ static int read_trace(vector<struct trace_req> &traces, struct sim_cfg &scfg, st
 					sstat.nr_org_traces[TOTAL]++;
 				} else {
 					sampled_pages.insert(treq.addr);
-					sstat.nr_sampled_traces[treq.rtype]++;
+					sstat.nr_sampled_traces[treq.type]++;
 					sstat.nr_sampled_traces[TOTAL]++;
-					sampled_traces.push_back(treq);
+					traces.push_back(treq);
 					// Write the sampled trace to the file
 					sampled_file << cur_str << endl;
 				}
@@ -376,6 +386,7 @@ static int read_trace(vector<struct trace_req> &traces, struct sim_cfg &scfg, st
 				break;
 		}
 	}
+
 	scfg.nr_org_pages = org_pages.size();
 	scfg.nr_org_traces = sstat.nr_sampled_traces[TOTAL];
 	scfg.nr_sampled_pages = sampled_pages.size();
@@ -388,24 +399,61 @@ static int read_trace(vector<struct trace_req> &traces, struct sim_cfg &scfg, st
 	// flush the sampled trace file
 	sampled_file.flush();
 	sampled_file.close();
+
+	return 0;
+}
+
+static void calc_tier_cap(struct sim_cfg &scfg) {
+	// Set the capacity of each tier
+	// total_cap is scfg.nr_sampled_pages * scfg.tier_cap_scale / 100;
+	scfg.total_cap = scfg.nr_sampled_pages * (100 + scfg.tier_cap_scale) / 100;
+	int total_cap_ratio = 0;
+	for (int i = 0; i < scfg.nr_tiers; i++) {
+		total_cap_ratio += scfg.tier_cap_ratio[i];
+	}
+
+	for (int i = 0; i < scfg.nr_tiers; i++) {
+		scfg.tier_cap[i] = scfg.total_cap * scfg.tier_cap_ratio[i] / total_cap_ratio;
+		if (scfg.tier_cap[i] <= 0) {
+			cout << "Tier " << i << " capacity is less than 0!" << endl;
+			abort();
+		}
+	}
+}
+
+static int read_trace(vector<struct trace_req> &traces, struct sim_cfg &scfg, struct sim_stat &sstat) {
+	unordered_set<uint64_t> org_pages, sampled_pages;
+	struct trace_req treq = {0};
+	uint64_t lines = 0;
+	int ret = 0;
+
+	// Check if we need to read the trace file
+	if (need_to_read_org_trace(scfg)) {
+		// If the sampled trace file does not exist or is empty, we need to read the original trace file
+		cout << "Reading original trace file: " << scfg.trace_file << endl;
+		ret = read_org_trace(traces, scfg, sstat);
+	} else {
+		// If the sampled trace file already exists, we don't need to read the original trace file again
+		// Just read the sampled trace file
+		cout << "Sampled trace file already exists. No need to read the trace file again." << endl;
+		ret = read_sampled_trace(traces, scfg, sstat);
+	}
+
+	return ret;
 }
 
 // Initialize the simulators
 void init_sim(struct sim_cfg &scfg) {
-	// Set the capacity of each tier
-	// total_cap is scfg.nr_sampled_pages * scfg.tier_cap_scale / 100;
-	int total_cap = scfg.nr_sampled_pages * scfg.tier_cap_scale / 100;
-	for (int i = 0; i < scfg.nr_tiers; i++) {
-		scfg.tier_cap[i] = total_cap * scfg.tier_cap_ratio[i] / 100;
-	}
 
 	// Initialize the simulators
 	if (scfg.do_an)
 		init_an(scfg);
+	/*
 	if (scfg.do_at)
 		init_at(scfg);
 	if (scfg.do_mtm)
 		init_mtm(scfg);
+	*/
 }
 
 void process_trace(struct trace_req &trace, struct sim_cfg &scfg) {
@@ -413,11 +461,13 @@ void process_trace(struct trace_req &trace, struct sim_cfg &scfg) {
 		case LOAD:
 		case STORE:
 			if (scfg.do_an)
-				an_add_trace(trace.addr, trace.type == LOAD);
+				an_add_trace(trace);
+			/*
 			if (scfg.do_at)
 				at_add_trace(trace.addr, trace.type == LOAD);
 			if (scfg.do_mtm)
 				mtm_add_trace(trace.addr, trace.type == LOAD);
+			*/
 			break;
 		default:
 			break;
@@ -432,20 +482,24 @@ void do_sim(vector<struct trace_req> &traces, struct sim_cfg &scfg) {
 	}
 
 	if (scfg.do_an)
-		do_an(scfg);
+		do_an();
+	/*
 	if (scfg.do_at)
 		do_at(scfg);
 	if (scfg.do_mtm)
 		do_mtm(scfg);
+	*/
 }
 
 void destroy_sim(struct sim_cfg &scfg) {
 	if (scfg.do_an)
 		destroy_an();
+	/*
 	if (scfg.do_at)
 		destroy_at();
 	if (scfg.do_mtm)
 		destroy_mtm();
+	*/
 }
 
 void print_sim(struct sim_stat &sstat) {
@@ -453,15 +507,13 @@ void print_sim(struct sim_stat &sstat) {
 	cout << "Simulation Statistics:" << endl;
 	cout << "Original Traces: " << sstat.nr_org_traces[TOTAL] << endl;
 	cout << "Sampled Traces: " << sstat.nr_sampled_traces[TOTAL] << endl;
-	cout << "Original Pages: " << sstat.nr_org_pages << endl;
-	cout << "Sampled Pages: " << sstat.nr_sampled_pages << endl;
 }
 
 int main(int argc, char **argv) {
 	string cur_str;
 	struct sim_cfg scfg = {0};
 	struct sim_stat sstat = {0};
-	const char *cfg_file = "/home/koo/src/trace_generator/run_script/simulator/default.cfg";
+	const char *cfg_file = "/home/koo/src/migopt/simulator/sim_cfg/default.cfg";
 
 	memset(&sstat, 0, sizeof(sstat)); // Ensure tstat.nr_trace is properly initialized
 
@@ -470,11 +522,12 @@ int main(int argc, char **argv) {
 
 	get_sim_conf(cfg_file, scfg);
 
-	struct trace_req treq = {0};
-	uint64_t cur_time = 1;
-
 	vector<struct trace_req> sampled_traces;
 	read_trace(sampled_traces, scfg, sstat);
+
+	calc_tier_cap(scfg);
+
+	print_conf(scfg);
 
 	init_sim(scfg);
 

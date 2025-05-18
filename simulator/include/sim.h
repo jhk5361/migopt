@@ -49,6 +49,7 @@ struct sim_cfg {
 	int nr_tiers; // number of tiers
 	int tier_cap_scale; // total cap = nr_sampled_pages * tier_cap_scale / 100
 	int tier_cap_ratio[MAX_NR_TIERS]; // ratio of each tier
+	int total_cap; // total capacity
 	int tier_cap[MAX_NR_TIERS]; // cap of each tier
 
 	int tier_lat_loads[MAX_NR_TIERS]; // latency of loads
@@ -63,9 +64,7 @@ struct sim_cfg {
 	int do_an; // 0: do not AutoNUMA, 1: do Balanced AutoNUMA, 2: do Tiered AutoNUMA, 3: do No Migration
 	int do_at; // 0: do not AutoTiering, 1: do AutoTiering
 	int do_mtm; // 0: do not MTM, 1: do default MTM, 2: do prioritized MTM
-
 	int do_migopt; // 0: do not MigOpt, 1: do MigOpt
-
 	int do_analysis; // 0: do not analysis, 1: do analysis
 
 

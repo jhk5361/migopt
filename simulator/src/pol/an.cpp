@@ -27,6 +27,7 @@ void an_add_trace(struct trace_req &t) {
 
 void init_an(struct sim_cfg &scfg) {
 	my_an = new struct an;
+	memset(my_an, 0, sizeof(struct an));
 	my_an->nr_tiers = scfg.nr_tiers;
 	my_an->mig_period = scfg.mig_period;
 	my_an->mig_traffic = scfg.mig_traffic == -1 ? 1000 : scfg.mig_traffic;
@@ -34,10 +35,10 @@ void init_an(struct sim_cfg &scfg) {
 	my_an->sched_file = scfg.sched_file;
 
 	for(int i = 0; i < scfg.nr_tiers; i++) {
-		my_an->lat_loads[i] = scfg.lat_loads[i];
-		my_an->lat_stores[i] = scfg.lat_stores[i];
-		my_an->lat_4KB_reads[i] = scfg.lat_4KB_reads[i];
-		my_an->lat_4KB_writes[i] = scfg.lat_4KB_writes[i];
+		my_an->tier_lat_loads[i] = scfg.tier_lat_loads[i];
+		my_an->tier_lat_stores[i] = scfg.tier_lat_stores[i];
+		my_an->tier_lat_4KB_reads[i] = scfg.tier_lat_4KB_reads[i];
+		my_an->tier_lat_4KB_writes[i] = scfg.tier_lat_4KB_writes[i];
 		my_an->tiers[i].cap = scfg.tier_cap[i];
 		my_an->tiers[i].size = 0;
 	}
@@ -420,19 +421,19 @@ static int do_mig() {
 
 
 struct an_perf calc_perf() {
-	int64_t lat_acc = 0, lat_mig = 0, lat_alc = 0;
+	int64_t tier_lat_acc = 0, tier_lat_mig = 0, tier_lat_alc = 0;
 	for (int i = 0; i < my_an->nr_tiers; i++) {
-		lat_acc += my_an->nr_loads[i] * my_an->lat_loads[i] + my_an->nr_stores[i] * my_an->lat_stores[i];
-		lat_alc += my_an->nr_alloc[i] * my_an->lat_4KB_writes[i];
+		tier_lat_acc += my_an->nr_loads[i] * my_an->tier_lat_loads[i] + my_an->nr_stores[i] * my_an->tier_lat_stores[i];
+		tier_lat_alc += my_an->nr_alloc[i] * my_an->tier_lat_4KB_writes[i];
 	}
 
 	for (int i = 0; i < my_an->nr_tiers; i++) {
 		for (int j = 0; j < my_an->nr_tiers; j++) {
-			lat_mig += my_an->nr_mig[i][j] * (my_an->lat_4KB_reads[i] + my_an->lat_4KB_writes[j]);
+			tier_lat_mig += my_an->nr_mig[i][j] * (my_an->tier_lat_4KB_reads[i] + my_an->tier_lat_4KB_writes[j]);
 		}
 	}
 
-	struct an_perf ret = {lat_acc, lat_mig, lat_alc};
+	struct an_perf ret = {tier_lat_acc, tier_lat_mig, tier_lat_alc};
 
 	return ret;
 }
@@ -459,12 +460,18 @@ void *__do_an (vector<int> &alloc_order) {
 }
 
 static void clear_an() {
-	for (auto &page : my_an->pt) {
-		delete(page.second);
+	for (int i = 0; i < my_an->nr_tiers; i++) {
+		my_an->nr_alloc[i] = 0;
+		my_an->nr_loads[i] = 0;
+		my_an->nr_stores[i] = 0;
+		my_an->nr_accesses[i] = 0;
+		my_an->nr_mig[i][i] = 0;
+		my_an->tiers[i].size = 0;
+		my_an->tiers[i].lru_list->clear();
 	}
 
-	for (int i = 0; i < my_an->nr_tiers; i++) {
-		my_an->tiers[i].lru_list->clear();
+	for (auto &page : my_an->pt) {
+		delete(page.second);
 	}
 
 	my_an->pt.clear();
@@ -481,7 +488,7 @@ void print_an_sched () {
 		aorder += to_string(my_an->alloc_order[i]);
 
 	string output_file = my_an->sched_file;
-	output_file = output_file + "_an_mode" + to_string(my_an->mode) + "_aorder" + aorder + ".txt";
+	output_file = output_file + ".an_mode" + to_string(my_an->mode) + ".aorder" + aorder + ".sched";
 
 	ofstream writeFile(output_file.c_str());
 
@@ -520,14 +527,17 @@ void print_an() {
 
 	cout << "alloc stat\n";
 	for (int i = 0; i < my_an->nr_tiers; i++) {
-		cout << " " << my_an->nr_alloc[i];
+		cout << my_an->nr_alloc[i] << " ";
 	}
+	cout << endl;
 
 	cout << "access stat\n";
 	for (int i = 0; i < my_an->nr_tiers; i++) {
-		cout << " " << my_an->nr_accesses[i];
+		cout << my_an->nr_accesses[i] << " ";
 	}
-	cout << "mig traffic\n" << endl;
+	cout << endl;
+
+	cout << "mig traffic\n"; 
 	for (int i = 0; i < my_an->nr_tiers; i++) {
 		for (int j = 0; j < my_an->nr_tiers; j++) {
 			cout << my_an->nr_mig[i][j] << " ";
