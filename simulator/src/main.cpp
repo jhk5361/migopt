@@ -18,11 +18,12 @@
 #include <unordered_set>
 #include <libconfig.h>
 #include "sim.h"
+#include "an.h"
+#include "at.h"
 //#include "mcmf.h" // for testing
 //#include "analysis.h"
 //#include "mtm.h"
-#include "an.h"
-//include "at.h"
+
 using namespace std;
 
 
@@ -448,9 +449,9 @@ void init_sim(struct sim_cfg &scfg) {
 	// Initialize the simulators
 	if (scfg.do_an)
 		init_an(scfg);
-	/*
 	if (scfg.do_at)
 		init_at(scfg);
+	/*
 	if (scfg.do_mtm)
 		init_mtm(scfg);
 	*/
@@ -462,9 +463,9 @@ void process_trace(struct trace_req &trace, struct sim_cfg &scfg) {
 		case STORE:
 			if (scfg.do_an)
 				an_add_trace(trace);
-			/*
 			if (scfg.do_at)
-				at_add_trace(trace.addr, trace.type == LOAD);
+				at_add_trace(trace);
+			/*
 			if (scfg.do_mtm)
 				mtm_add_trace(trace.addr, trace.type == LOAD);
 			*/
@@ -483,20 +484,20 @@ void do_sim(vector<struct trace_req> &traces, struct sim_cfg &scfg) {
 
 	if (scfg.do_an)
 		do_an();
-	/*
 	if (scfg.do_at)
-		do_at(scfg);
+		do_at();
+	/*
 	if (scfg.do_mtm)
-		do_mtm(scfg);
+		do_mtm();
 	*/
 }
 
 void destroy_sim(struct sim_cfg &scfg) {
 	if (scfg.do_an)
 		destroy_an();
-	/*
 	if (scfg.do_at)
 		destroy_at();
+	/*
 	if (scfg.do_mtm)
 		destroy_mtm();
 	*/
