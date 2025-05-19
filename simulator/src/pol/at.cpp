@@ -103,7 +103,7 @@ static struct at_page *alloc_page(uint64_t addr) {
 		abort();
 	}
 
-	struct at_page *page = (struct at_page *)malloc(sizeof(struct at_page));
+	struct at_page *page = new struct at_page;
 	page->addr = addr;
 	page->freq = 0;
 	page->tier = cur_tier;
