@@ -49,19 +49,25 @@ void init_an(struct sim_cfg &scfg) {
 
 	my_an->pt = map<uint64_t, struct an_page *>();
 	my_an->lru_list = new std::list<struct an_page *>();
-	my_an->nr_period = 1;
 }
 
 void destroy_an() {
+	for (auto &page : my_an->pt) {
+		delete(page.second);
+	}
+	my_an->pt.clear();
+
 	for (int i = 0; i < my_an->nr_tiers; i++) {
 		my_an->tiers[i].lru_list->clear();
 		delete my_an->tiers[i].lru_list;
 	}
-	my_an->pt.clear();
 	my_an->lru_list->clear();
 	delete my_an->lru_list;
-	traces.clear();
+
 	delete my_an;
+	my_an = NULL;
+
+	traces.clear();
 }
 
 static void update_tier_meta(struct an_page *page, bool is_new) {
@@ -101,7 +107,6 @@ static struct an_page *alloc_page(uint64_t addr) {
 	page->addr = addr;
 	page->freq = 0;
 	page->tier = cur_tier;
-	page->in_active = INIT;
 	my_an->tiers[cur_tier].size++;
 	my_an->nr_alloc[cur_tier]++;
 
@@ -188,6 +193,8 @@ static int do_demo(list<struct an_page *> &demo_list) {
 	return nr_demo;
 }
 
+// Scan tiers except tier-0 for the promotion
+// the size of promo_list is limited by the mig_traffic or NR_REV_DEMO
 static list<struct an_page*> scan_meta_for_promo(vector<int> &nr_free, vector<int> &nr_cand) {
 	vector<vector<vector<struct an_page *>>> promo_cand(my_an->nr_tiers, vector<vector<struct an_page*>>(my_an->nr_tiers, vector<struct an_page *>()));
 	list<struct an_page *> promo_list;
@@ -206,7 +213,6 @@ static list<struct an_page*> scan_meta_for_promo(vector<int> &nr_free, vector<in
 			continue;
 
 		promo_list.push_front(page);
-		//promo_cand[page->tier][0].push_back(page);
 		nr_cand[page->tier]++;
 		nr_free[0]--;
 		nr_free[page->tier]++;
@@ -217,10 +223,10 @@ static list<struct an_page*> scan_meta_for_promo(vector<int> &nr_free, vector<in
 			break;
 	}
 	
-	//return promo_cand;
 	return promo_list;
 }
 
+// Scan tier-0 for the demotion
 static list<struct an_page *> scan_meta_for_demo(int nr_demo) {
 	list<struct an_page *> demo_list;
 
@@ -241,6 +247,7 @@ static list<struct an_page *> scan_meta_for_demo(int nr_demo) {
 	return demo_list;
 }
 
+// Scan tier-0 and tier-1 to select canditates for reserving free spaces
 static list<struct an_page *> scan_meta_for_rev_demo(int nr_rev_rate, vector<int> &nr_free) {
 	list<struct an_page *> demo_list;
 
@@ -293,6 +300,11 @@ static vector<int> calc_nr_free () {
 	return nr_free;
 }
 
+// If the nr_free[0] is negative, it means that the tier-0 has to demote some pages
+// to tier-2. The nr_free[2] and in tier-2.
+// The nr_free[0] is the number of pages that should be demoted.
+// If nr_free[2] is not enough to accommodate the demoted pages from tier-0,
+// cancle the pages of tier-1 or tier-3 in the promo_list.
 static int adjust_promo_cand_for_demo(list<struct an_page*> &promo_list, vector<int> &nr_free) {
 	int nr_should_demo = -nr_free[0];
 
@@ -325,6 +337,9 @@ static int adjust_promo_cand_for_demo(list<struct an_page*> &promo_list, vector<
 	return nr_should_demo;
 }
 
+// If the promo_list has enough free space, refill the promo_list using the lru_list
+// and the demo_list using the tier-0 lru_list.
+// The refilled pages must be in tier-2.
 static void refill_promo_demo_list(list<struct an_page *> &promo_list, list<struct an_page *> &demo_list) {
 	if (promo_list.size() == my_an->mig_traffic)
 		return;
@@ -420,7 +435,7 @@ static int do_mig() {
 }
 
 
-struct an_perf calc_perf() {
+static struct an_perf calc_perf() {
 	int64_t tier_lat_acc = 0, tier_lat_mig = 0, tier_lat_alc = 0;
 	for (int i = 0; i < my_an->nr_tiers; i++) {
 		tier_lat_acc += my_an->nr_loads[i] * my_an->tier_lat_loads[i] + my_an->nr_stores[i] * my_an->tier_lat_stores[i];
@@ -446,7 +461,6 @@ void *__do_an (vector<int> &alloc_order) {
 	for (int i = 0; i < traces.size(); i++) {
 		an_proc_req(&traces[i]);
 		if (i != 0 && (i % my_an->mig_period) == 0) {
-			my_an->nr_period++;
 			if (do_mig() < 0) {
 				my_an->perf = {0,0,0};
 				return my_an;
@@ -479,10 +493,7 @@ static void clear_an() {
 }
 
 void print_an_sched () {
-	vector<unordered_set<uint64_t>> addr_by_tier = vector(my_an->nr_tiers, unordered_set<uint64_t>());
-
-	int period = 0;
-
+	// set sched file name
 	string aorder = "";
 	for (int i = 0; i < my_an->nr_tiers; i++)
 		aorder += to_string(my_an->alloc_order[i]);
@@ -492,29 +503,26 @@ void print_an_sched () {
 
 	ofstream writeFile(output_file.c_str());
 
-	
+	// generate migration schedule 
+	int nr_period = (traces.size() % my_an->mig_period == 0) ? traces.size() / my_an->mig_period : traces.size() / my_an->mig_period + 1;
+	vector<map<uint64_t,int>> mig_sched = vector(nr_period, map<uint64_t,int>());
+	int period = 0;
 	for (int i = 0; i < traces.size(); i++) {
 		period = i / my_an->mig_period;
 
-		if ((i % my_an->mig_period) == 0) {
-			for (int j = 0; j < my_an->nr_tiers; j++) {
-				for (auto item: addr_by_tier[j]) {
-					writeFile << "A " << (period - 1) * my_an->mig_period << " " << item << " " << j << " " << 0 << "\n";
-				}
-				addr_by_tier[j].clear();
+		if (i > 0 && (i-1)/my_an->mig_period != period) {
+			for (auto &item : mig_sched[period-1]) {
+				mig_sched[period].insert(item);
 			}
-			period++;
 		}
-
-		if (addr_by_tier[traces[i].tier].count(traces[i].addr) == 0)
-			addr_by_tier[traces[i].tier].insert(traces[i].addr);
+		
+		mig_sched[period][traces[i].addr] = traces[i].tier;
 	}
 
-	for (int j = 0; j < my_an->nr_tiers; j++) {
-		for (auto item: addr_by_tier[j]) {
-			writeFile << "A " << period * my_an->mig_period << " " << item << " " << j << " " << 0 << "\n";
+	for (int i = 0; i < nr_period; i++) {
+		for (auto item: mig_sched[i]) {
+				writeFile << "A " << i * my_an->mig_period << " " << item.first << " " << item.second << " " << 0 << "\n";
 		}
-		addr_by_tier[j].clear();
 	}
 
 	fflush(stdout);
