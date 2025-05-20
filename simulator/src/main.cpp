@@ -447,11 +447,11 @@ static int read_trace(vector<struct trace_req> &traces, struct sim_cfg &scfg, st
 void init_sim(struct sim_cfg &scfg) {
 
 	// Initialize the simulators
-	if (scfg.do_an)
+	if (scfg.do_an > 0)
 		init_an(scfg);
-	if (scfg.do_at)
+	if (scfg.do_at > 0)
 		init_at(scfg);
-	if (scfg.do_mtm)
+	if (scfg.do_mtm > 0)
 		init_mtm(scfg);
 }
 
@@ -459,11 +459,11 @@ void process_trace(struct trace_req &trace, struct sim_cfg &scfg) {
 	switch (trace.type) {
 		case LOAD:
 		case STORE:
-			if (scfg.do_an)
+			if (scfg.do_an > 0)
 				an_add_trace(trace);
-			if (scfg.do_at)
+			if (scfg.do_at > 0)
 				at_add_trace(trace);
-			if (scfg.do_mtm)
+			if (scfg.do_mtm > 0)
 				mtm_add_trace(trace);
 			break;
 		default:
@@ -478,20 +478,20 @@ void do_sim(vector<struct trace_req> &traces, struct sim_cfg &scfg) {
 		process_trace(trace, scfg);
 	}
 
-	if (scfg.do_an)
+	if (scfg.do_an > 0)
 		do_an();
-	if (scfg.do_at)
+	if (scfg.do_at > 0)
 		do_at();
-	if (scfg.do_mtm)
+	if (scfg.do_mtm > 0)
 		do_mtm();
 }
 
 void destroy_sim(struct sim_cfg &scfg) {
-	if (scfg.do_an)
+	if (scfg.do_an > 0)
 		destroy_an();
-	if (scfg.do_at)
+	if (scfg.do_at > 0)
 		destroy_at();
-	if (scfg.do_mtm)
+	if (scfg.do_mtm > 0)
 		destroy_mtm();
 }
 
