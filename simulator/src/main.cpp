@@ -20,9 +20,9 @@
 #include "sim.h"
 #include "an.h"
 #include "at.h"
+#include "mtm.h"
 //#include "mcmf.h" // for testing
 //#include "analysis.h"
-//#include "mtm.h"
 
 using namespace std;
 
@@ -451,10 +451,8 @@ void init_sim(struct sim_cfg &scfg) {
 		init_an(scfg);
 	if (scfg.do_at)
 		init_at(scfg);
-	/*
 	if (scfg.do_mtm)
 		init_mtm(scfg);
-	*/
 }
 
 void process_trace(struct trace_req &trace, struct sim_cfg &scfg) {
@@ -465,10 +463,8 @@ void process_trace(struct trace_req &trace, struct sim_cfg &scfg) {
 				an_add_trace(trace);
 			if (scfg.do_at)
 				at_add_trace(trace);
-			/*
 			if (scfg.do_mtm)
-				mtm_add_trace(trace.addr, trace.type == LOAD);
-			*/
+				mtm_add_trace(trace);
 			break;
 		default:
 			break;
@@ -486,10 +482,8 @@ void do_sim(vector<struct trace_req> &traces, struct sim_cfg &scfg) {
 		do_an();
 	if (scfg.do_at)
 		do_at();
-	/*
 	if (scfg.do_mtm)
 		do_mtm();
-	*/
 }
 
 void destroy_sim(struct sim_cfg &scfg) {
@@ -497,10 +491,8 @@ void destroy_sim(struct sim_cfg &scfg) {
 		destroy_an();
 	if (scfg.do_at)
 		destroy_at();
-	/*
 	if (scfg.do_mtm)
 		destroy_mtm();
-	*/
 }
 
 void print_sim(struct sim_stat &sstat) {

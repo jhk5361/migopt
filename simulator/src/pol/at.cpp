@@ -466,8 +466,7 @@ void *__do_at (vector<int> &alloc_order) {
 		at_proc_req(&traces[i]);
 		if (i != 0 && (i % my_at->mig_period) == 0) {
 			if (do_mig() < 0) {
-				my_at->perf = {0,0,0};
-				return my_at;
+				abort();
 			}
 		}
 	}
@@ -483,9 +482,14 @@ static void clear_at() {
 		my_at->nr_loads[i] = 0;
 		my_at->nr_stores[i] = 0;
 		my_at->nr_accesses[i] = 0;
-		my_at->nr_mig[i][i] = 0;
 		my_at->tiers[i].size = 0;
 		my_at->tiers[i].lru_list->clear();
+	}
+
+	for (int i = 0; i < my_at->nr_tiers; i++) {
+		for (int j = 0; j < my_at->nr_tiers; j++) {
+			my_at->nr_mig[i][j] = 0;
+		}
 	}
 
 	for (auto &page : my_at->pt) {

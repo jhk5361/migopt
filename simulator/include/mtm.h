@@ -47,15 +47,12 @@ struct mtm {
 	int tier_lat_4KB_writes[MAX_NR_TIERS];
 	char *sched_file;
 
-	int promo_prior[6];
-	int demo_prior[6];
-
 	map<int, map<uint64_t, struct mtm_page *>> hist;
 	map<uint64_t, struct mtm_page *> pt;
 
 };
 
-void mtm_add_trace(struct mtm_trace &t); 
+void mtm_add_trace(struct trace_req &t); 
 void init_mtm(struct sim_cfg &scfg);
 void do_mtm();
 void destroy_mtm();

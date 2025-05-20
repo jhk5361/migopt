@@ -462,8 +462,7 @@ void *__do_an (vector<int> &alloc_order) {
 		an_proc_req(&traces[i]);
 		if (i != 0 && (i % my_an->mig_period) == 0) {
 			if (do_mig() < 0) {
-				my_an->perf = {0,0,0};
-				return my_an;
+				abort();
 			}
 		}
 	}
@@ -479,9 +478,14 @@ static void clear_an() {
 		my_an->nr_loads[i] = 0;
 		my_an->nr_stores[i] = 0;
 		my_an->nr_accesses[i] = 0;
-		my_an->nr_mig[i][i] = 0;
 		my_an->tiers[i].size = 0;
 		my_an->tiers[i].lru_list->clear();
+	}
+
+	for (int i = 0; i < my_an->nr_tiers; i++) {
+		for (int j = 0; j < my_an->nr_tiers; j++) {
+			my_an->nr_mig[i][j] = 0;
+		}
 	}
 
 	for (auto &page : my_an->pt) {

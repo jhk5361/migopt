@@ -34,11 +34,8 @@ static vector<int> calc_nr_free () {
 	return nr_free;
 }
 
-void mtm_add_trace(struct mtm_trace &t) {
+void mtm_add_trace(struct trace_req &t) {
 	traces.push_back(t);
-}
-
-void init_mtm(int cap, int _my_mtm->nr_tiers, int *aorder, int *cap_ratio, int *_lat_loads, int *_lat_stores, int *_lat_4KB_reads, int *_lat_4KB_writes, int _mig_period, int _mig_traffic, int mtm_mode, char *_alloc_file) {
 }
 
 void init_mtm(struct sim_cfg &scfg) {
@@ -249,7 +246,6 @@ static list<struct mtm_page *> scan_hist_for_promo() {
 	for (auto it = my_mtm->hist.rbegin(); it != my_mtm->hist.rend(); ++it) {
 		if (it->second.size() == 0) continue;
 
-
 		for (auto &bin_item : it->second) {
 			if (promo_nr_scan >= my_mtm->tiers[promo_target].cap) {
 				promo_target++;
@@ -286,83 +282,74 @@ static vector<stack<struct mtm_page*>> scan_hist_for_demo() {
 	return demo_cand;
 }
 
-static int do_mig(struct mtm *my_mtm, int *promo_prior, int *demo_prior) {
-	auto promo_list = scan_hist_for_promo_default(my_mtm);
-	if (do_promo_default(my_mtm, promo_prior, promo_list) == 0)
+static int do_mig() {
+	auto promo_list = scan_hist_for_promo();
+	if (do_promo(promo_list) == 0)
 		return 0;
 
-	auto demo_cand = scan_hist_for_demo(my_mtm);
-	if (do_demo(my_mtm, demo_prior, demo_cand) < 0)
+	auto demo_cand = scan_hist_for_demo();
+	if (do_demo(demo_cand) < 0)
 		return -1;
 
 	return 0;
 }
 
-
-struct mtm_perf calc_perf(struct mtm *my_mtm) {
-	int64_t lat_acc = 0, lat_mig = 0, lat_alc = 0;
-	int nr_acc[4] = {0,};
-	int sum;
+static struct mtm_perf calc_perf() {
+	int64_t tier_lat_acc = 0, tier_lat_mig = 0, tier_lat_alc = 0;
 	for (int i = 0; i < my_mtm->nr_tiers; i++) {
-		lat_acc += my_mtm->nr_loads[i] * lat_loads[i] + my_mtm->nr_stores[i] * lat_stores[i];
-		lat_alc += my_mtm->nr_alloc[i] * lat_4KB_writes[i];
-		nr_acc[i] = my_mtm->nr_loads[i] + my_mtm->nr_stores[i];
-		sum += nr_acc[i];
+		tier_lat_acc += my_mtm->nr_loads[i] * my_mtm->tier_lat_loads[i] + my_mtm->nr_stores[i] * my_mtm->tier_lat_stores[i];
+		tier_lat_alc += my_mtm->nr_alloc[i] * my_mtm->tier_lat_4KB_writes[i];
 	}
 
 	for (int i = 0; i < my_mtm->nr_tiers; i++) {
 		for (int j = 0; j < my_mtm->nr_tiers; j++) {
-			lat_mig += my_mtm->nr_mig[i][j] * (lat_4KB_reads[i] + lat_4KB_writes[j]);
+			tier_lat_mig += my_mtm->nr_mig[i][j] * (my_mtm->tier_lat_4KB_reads[i] + my_mtm->tier_lat_4KB_writes[j]);
 		}
 	}
 
-	printf("trace size: %ld, sum: %d\n", trace.size(), sum);
-	for (int i = 0; i < 4; i++) {
-		printf("%d ", nr_acc[i]);
-	}
-	printf("\n");
-
-	struct mtm_perf ret = {lat_acc, lat_mig, lat_alc};
+	struct at_perf ret = {tier_lat_acc, tier_lat_mig, tier_lat_alc};
 
 	return ret;
 }
 
-void *__do_mtm (void *arg) {
-	struct mtm *my_mtm = (struct mtm *)arg;
-	int cnt = 0;
+void *__do_mtm (vector<int> &alloc_order) {
+	for (int i = 0; i < my_mtm->nr_tiers; i++) {
+		my_mtm->alloc_order[i] = alloc_order[i];
+	}
 
-	loads = stores = nr_sum = 0;
-
-	for (int i = 0; i < trace.size(); i++) {
-		//mtm_proc_req(my_mtm, trace[i].first, trace[i].second);
-		cnt = nr_sum;
-		mtm_proc_req(my_mtm, &trace[i]);
-		calc_nr_free(my_mtm);
-		if (i != 0 && (i % mig_period) == 0) {
-			if (do_mig(my_mtm, my_mtm->promo_prior, my_mtm->demo_prior) < 0) {
-				my_mtm->perf = {0,0,0};
-				return my_mtm;
+	for (int i = 0; i < traces.size(); i++) {
+		mtm_proc_req(&traces[i]);
+		if (i != 0 && (i % my_mtm->mig_period) == 0) {
+			if (do_mig() < 0) {
+				abort();
 			}
 		}
 
-		if (i != 0 && (i % mig_period * 2) == 0) {
+		if (i != 0 && (i % my_mtm->mig_period * 2) == 0) {
 			cool_hist(my_mtm);
 		}
-
-		if (nr_sum != cnt + 1)
-			abort();
 	}
 
-
-	printf("loads: %d, stores: %d, sum: %d\n", loads, stores, nr_sum);
-
 	my_mtm->perf = calc_perf(my_mtm);
-	return my_mtm;
 
-	//print_hist();
+	return my_mtm;
 }
 
 static void clear_mtm(struct mtm *my_mtm) {
+	for (int i = 0; i < my_mtm->nr_tiers; i++) {
+		my_mtm->nr_alloc[i] = 0;
+		my_mtm->nr_loads[i] = 0;
+		my_mtm->nr_stores[i] = 0;
+		my_mtm->nr_accesses[i] = 0;
+		my_mtm->tiers[i].size = 0;
+	}
+
+	for (int i = 0; i < my_mtm->nr_tiers; i++) {
+		for (int j = 0; j < my_mtm->nr_tiers; j++) {
+			my_mtm->nr_mig[i][j] = 0;
+		}
+	}
+
 	for (auto &page : my_mtm->pt) {
 		free(page.second);
 	}
@@ -373,73 +360,50 @@ static void clear_mtm(struct mtm *my_mtm) {
 	free(my_mtm);
 }
 
-void print_mtm_sched (struct mtm *my_mtm) {
-	vector<unordered_set<uint64_t>> addr_by_tier = vector(my_mtm->nr_tiers, unordered_set<uint64_t>());
-
-	int period = 0;
-
+void print_mtm_sched () {
+	// set sched file name
 	string aorder = "";
 	for (int i = 0; i < my_mtm->nr_tiers; i++)
 		aorder += to_string(my_mtm->alloc_order[i]);
 
-	string output_file = alloc_file;
+	string output_file = my_mtm->sched_file;
+	output_file = output_file + ".mtm_mode" + to_string(my_mtm->mode) + ".aorder" + aorder + ".sched";
 
-	output_file = output_file + "_mtm_mode" + to_string(mode) + "_aorder" + aorder + ".txt";
 	ofstream writeFile(output_file.c_str());
-	
-	for (int i = 0; i < trace.size(); i++) {
-		period = i / mig_period;
 
-		if ((i % mig_period) == 0) {
-			for (int j = 0; j < my_mtm->nr_tiers; j++) {
-				for (auto item: addr_by_tier[j]) {
-					writeFile << "A " << (period - 1) * mig_period << " " << item << " " << j << " " << 0 << "\n";
-				}
-				addr_by_tier[j].clear();
+	// generate migration schedule 
+	int nr_period = (traces.size() % my_mtm->mig_period == 0) ? traces.size() / my_mtm->mig_period : traces.size() / my_mtm->mig_period + 1;
+	vector<map<uint64_t,int>> mig_sched = vector(nr_period, map<uint64_t,int>());
+	int period = 0;
+	for (int i = 0; i < traces.size(); i++) {
+		period = i / my_mtm->mig_period;
+
+		if (i > 0 && (i-1)/my_mtm->mig_period != period) {
+			for (auto &item : mig_sched[period-1]) {
+				mig_sched[period].insert(item);
 			}
-			period++;
 		}
-
-		if (addr_by_tier[trace[i].tier].count(trace[i].va) == 0)
-			addr_by_tier[trace[i].tier].insert(trace[i].va);
+		
+		mig_sched[period][traces[i].addr] = traces[i].tier;
 	}
 
-	for (int j = 0; j < my_mtm->nr_tiers; j++) {
-		for (auto item: addr_by_tier[j]) {
-			writeFile << "A " << period * mig_period << " " << item << " " << j << " " << 0 << "\n";
+	for (int i = 0; i < nr_period; i++) {
+		for (auto item: mig_sched[i]) {
+				writeFile << "A " << i * my_mtm->mig_period << " " << item.first << " " << item.second << " " << 0 << "\n";
 		}
-		addr_by_tier[j].clear();
 	}
 
 	fflush(stdout);
 	writeFile.close();
 }
 
-
-void print_mtm(struct mtm *my_mtm) {
-	for (int i = 0; i < 6; i++) {
-		cout << my_mtm->promo_prior[i];
-	}
-	cout << " ";
-	for (int i = 0; i < 6; i++) {
-		cout << my_mtm->demo_prior[i];
-	}
-	cout << " ";
-
-	cout << my_mtm->perf.lat_acc << " " << my_mtm->perf.lat_mig <<  " " << my_mtm->perf.lat_alc << endl; 
-
-	print_mtm_sched(my_mtm);
-
-	return;
-}
-
-void print_mtm_default(struct mtm *my_mtm) {
+void print_mtm() {
 	cout << "lat_acc lat_mig lat_alc" << endl;
 	cout << my_mtm->perf.lat_acc << " " << my_mtm->perf.lat_mig <<  " " << my_mtm->perf.lat_alc << endl; 
 
 	cout << "alloc stat\n";
 	for (int i = 0; i < my_mtm->nr_tiers; i++) {
-		cout << my_mtm->nr_alloc[i] << " " ;
+		cout << my_mtm->nr_alloc[i] << " ";
 	}
 	cout << endl;
 
@@ -449,7 +413,7 @@ void print_mtm_default(struct mtm *my_mtm) {
 	}
 	cout << endl;
 
-	cout << "mig traffic\n" << endl;
+	cout << "mig traffic\n"; 
 	for (int i = 0; i < my_mtm->nr_tiers; i++) {
 		for (int j = 0; j < my_mtm->nr_tiers; j++) {
 			cout << my_mtm->nr_mig[i][j] << " ";
@@ -457,48 +421,20 @@ void print_mtm_default(struct mtm *my_mtm) {
 		cout << endl;
 	}
 
-	print_mtm_sched(my_mtm);
+	print_mtm_sched();
 
 	return;
 }
 
 void do_mtm() {
+	vector<vector<int>> alloc_orders = {{0,2,1,3}, {1,0,2,3}, {2,0,1,3}, {0,1,2,3}};
 
-    array<int, 6> promo = {0, 1, 2, 3, 4, 5};
-    array<int, 6> demo = {0, 1, 2, 3, 4, 5};
-	vector<vector<int>> aorder = {{0,2,1,3}, {1,0,2,3}, {2,0,1,3}, {0,1,2,3}};
-
-	int promo_prior[6] = {0,};
-	int demo_prior[6] = {0,};
-	int i = 0;
-	int nr_fail = 0, nr_succ = 0, nr_proc = 0;
-
-    using namespace std::chrono;
-    auto start_time = steady_clock::now();  // 시작 시간 기록
-	
-	int cur_id = 0;
-	pthread_t threads[NR_MAX_TH];
-	void *res;
-
-
-	for (int alloc_id = 0; alloc_id < aorder.size(); alloc_id++) {
+	for (int alloc_id = 0; alloc_id < alloc_orders.size(); alloc_id++) {
 		cout << "alloc id: " << alloc_id << endl;
 
-		struct mtm *my_mtm = (struct mtm *)malloc(sizeof(struct mtm));
-		memset(my_mtm, 0, sizeof(struct mtm));
+		 __do_mtm(alloc_orders[alloc_id]);
 
-		for (int i = 0; i < my_mtm->nr_tiers; i++) {
-			my_mtm->tiers[i].cap = tiers[i].cap;
-			my_mtm->alloc_order[i] = aorder[alloc_id][i];
-		}
-
-		my_mtm->hist = map<int, map<uint64_t, struct mtm_page *>>();
-		my_mtm->pt = map<uint64_t, struct mtm_page *>();
-
-		 __do_mtm(my_mtm);
-
-		print_mtm_default(my_mtm);
-		clear_mtm(my_mtm);
+		print_mtm();
+		clear_mtm();
 	}
-
 }
