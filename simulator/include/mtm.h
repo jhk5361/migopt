@@ -3,17 +3,12 @@
 
 #include <cstdint>
 #include <map>
+#include "sim.h"
 using namespace std;
 
-#define MTM_MAX_TIER 4
+#define M_DEFAULT 1
+#define M_ALL 2
 #define NR_MAX_TH 36
-
-struct mtm_trace {
-	uint64_t va;
-	bool is_load;
-	bool is_alloc;
-	int tier;
-};
 
 struct mtm_page {
 	uint64_t addr;
@@ -34,26 +29,35 @@ struct mtm_perf {
 };
 
 struct mtm {
-	struct mtm_tier tiers[MTM_MAX_TIER];
-	int nr_alloc[MTM_MAX_TIER];
-	int nr_loads[MTM_MAX_TIER];
-	int nr_stores[MTM_MAX_TIER];
-	int nr_accesses[MTM_MAX_TIER];
-	int nr_mig[MTM_MAX_TIER][MTM_MAX_TIER];
+	struct mtm_tier tiers[MAX_NR_TIERS];
+	int nr_alloc[MAX_NR_TIERS];
+	int nr_loads[MAX_NR_TIERS];
+	int nr_stores[MAX_NR_TIERS];
+	int nr_accesses[MAX_NR_TIERS];
+	int nr_mig[MAX_NR_TIERS][MAX_NR_TIERS];
+	int alloc_order[MAX_NR_TIERS];
+	struct at_perf perf;
+	int nr_tiers;
+	int mig_traffic;
+	int mig_period;
+	int mode;
+	int tier_lat_loads[MAX_NR_TIERS];
+	int tier_lat_stores[MAX_NR_TIERS];
+	int tier_lat_4KB_reads[MAX_NR_TIERS];
+	int tier_lat_4KB_writes[MAX_NR_TIERS];
+	char *sched_file;
+
 	int promo_prior[6];
 	int demo_prior[6];
-	int alloc_order[MTM_MAX_TIER];
-	struct mtm_perf perf;
-	int mode;
-
 
 	map<int, map<uint64_t, struct mtm_page *>> hist;
 	map<uint64_t, struct mtm_page *> pt;
 
 };
 
-void mtm_add_trace(uint64_t va, bool is_load); 
-void init_mtm(int cap, int _nr_tiers, int *aorder, int *cap_ratio, int *_lat_loads, int *_lat_stores, int *_lat_4KB_reads, int *_lat_4KB_writes, int _mig_period, int _mig_traffic, int mtm_mode, char *_alloc_file);
+void mtm_add_trace(struct mtm_trace &t); 
+void init_mtm(struct sim_cfg &scfg);
 void do_mtm();
+void destroy_mtm();
 
 #endif
