@@ -566,7 +566,12 @@ void do_an() {
 	vector<vector<int>> alloc_orders = {{0,2,1,3}, {1,0,2,3}, {2,0,1,3}, {0,1,2,3}};
 
 	for (int alloc_id = 0; alloc_id < alloc_orders.size(); alloc_id++) {
-		cout << "alloc id: " << alloc_id << endl;
+		cout << "alloc order: ";
+		for (int i = 0; i < alloc_orders[alloc_id].size(); i++) {
+			cout << alloc_orders[alloc_id][i] << " ";
+		}
+		cout << endl;
+
 
 		 __do_an(alloc_orders[alloc_id]);
 
