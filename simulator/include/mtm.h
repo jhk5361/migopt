@@ -8,7 +8,6 @@ using namespace std;
 
 #define M_DEFAULT 1
 #define M_ALL 2
-#define NR_MAX_TH 36
 
 struct mtm_page {
 	uint64_t addr;
@@ -36,7 +35,7 @@ struct mtm {
 	int nr_accesses[MAX_NR_TIERS];
 	int nr_mig[MAX_NR_TIERS][MAX_NR_TIERS];
 	int alloc_order[MAX_NR_TIERS];
-	struct at_perf perf;
+	struct mtm_perf perf;
 	int nr_tiers;
 	int mig_traffic;
 	int mig_period;

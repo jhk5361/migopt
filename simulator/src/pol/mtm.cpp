@@ -78,8 +78,8 @@ void destroy_mtm() {
 // If the new frequency bin does not exist, create it and insert the page
 // If the new frequency bin exists, insert the page into the bin
 static void update_hist(uint64_t addr, int old_freq, int new_freq, struct mtm_page *page) {
-	if (old_freq != 0) {
-		auto old_hist_bin = my_mtm->hist.find(old_freq);
+	auto old_hist_bin = my_mtm->hist.find(old_freq);
+	if (old_hist_bin != my_mtm->hist.end()) {
 		old_hist_bin->second.erase(addr);
 	}
 
@@ -111,7 +111,7 @@ static void cool_hist() {
 			hist.insert({freq, new_bin});
 		}
 
-		for (auto &bin_item : it->second) {
+		for (auto bin_item : it->second) {
 			bin_item.second->freq = freq;
 			hist[freq].insert(bin_item);
 		}
@@ -167,7 +167,7 @@ static void mtm_proc_req(struct trace_req *t) {
 	int old_freq = page->freq;
 	page->freq++;
 
-	update_hist(my_mtm, t->va, old_freq, page->freq, page);
+	update_hist(t->addr, old_freq, page->freq, page);
 
 	if (t->type == LOAD) my_mtm->nr_loads[page->tier]++;
 	else my_mtm->nr_stores[page->tier]++;
@@ -181,7 +181,7 @@ static int do_promo(list<struct mtm_page *> promo_list) {
 	int nr_promo = 0;
 
 	for (auto &page : promo_list) {
-		if (nr_promo >= mig_traffic)
+		if (nr_promo >= my_mtm->mig_traffic)
 			return nr_promo;
 
 		src = page->tier;
@@ -189,6 +189,16 @@ static int do_promo(list<struct mtm_page *> promo_list) {
 
 		if (src == dst)
 			abort();
+
+		if (src == -1 || dst == -1) {
+			for (auto &page : promo_list) {
+				cout << "page addr: " << page->addr << " freq: " << page->freq << endl;
+				cout << "page tier: " << page->tier << " target: " << page->target << endl;
+			}
+			fflush(stdout);
+			abort();
+
+		}
 		
 		page->tier = dst; // mig
 		page->target = -1;
@@ -243,6 +253,8 @@ static list<struct mtm_page *> scan_hist_for_promo() {
 
 	int nr_need_move_item = 0;
 
+	int scan_cnt = 0;
+
 	for (auto it = my_mtm->hist.rbegin(); it != my_mtm->hist.rend(); ++it) {
 		if (it->second.size() == 0) continue;
 
@@ -254,13 +266,14 @@ static list<struct mtm_page *> scan_hist_for_promo() {
 	
 				promo_nr_scan = 0;
 			}
-			
+
 			if (bin_item.second->tier > promo_target) {
 				bin_item.second->target = promo_target;
 				promo_list.push_back({bin_item.second});
 			}
 
 			promo_nr_scan++;
+			scan_cnt++;
 		}
 	}
 
@@ -307,7 +320,7 @@ static struct mtm_perf calc_perf() {
 		}
 	}
 
-	struct at_perf ret = {tier_lat_acc, tier_lat_mig, tier_lat_alc};
+	struct mtm_perf ret = {tier_lat_acc, tier_lat_mig, tier_lat_alc};
 
 	return ret;
 }
@@ -326,16 +339,16 @@ void *__do_mtm (vector<int> &alloc_order) {
 		}
 
 		if (i != 0 && (i % my_mtm->mig_period * 2) == 0) {
-			cool_hist(my_mtm);
+			cool_hist();
 		}
 	}
 
-	my_mtm->perf = calc_perf(my_mtm);
+	my_mtm->perf = calc_perf();
 
 	return my_mtm;
 }
 
-static void clear_mtm(struct mtm *my_mtm) {
+static void clear_mtm() {
 	for (int i = 0; i < my_mtm->nr_tiers; i++) {
 		my_mtm->nr_alloc[i] = 0;
 		my_mtm->nr_loads[i] = 0;
@@ -351,13 +364,11 @@ static void clear_mtm(struct mtm *my_mtm) {
 	}
 
 	for (auto &page : my_mtm->pt) {
-		free(page.second);
+		delete page.second;
 	}
 
 	my_mtm->pt.clear();
 	my_mtm->hist.clear();
-
-	free(my_mtm);
 }
 
 void print_mtm_sched () {
@@ -430,7 +441,12 @@ void do_mtm() {
 	vector<vector<int>> alloc_orders = {{0,2,1,3}, {1,0,2,3}, {2,0,1,3}, {0,1,2,3}};
 
 	for (int alloc_id = 0; alloc_id < alloc_orders.size(); alloc_id++) {
-		cout << "alloc id: " << alloc_id << endl;
+		//print alloc orders
+		cout << "alloc order: ";
+		for (int i = 0; i < alloc_orders[alloc_id].size(); i++) {
+			cout << alloc_orders[alloc_id][i] << " ";
+		}
+		cout << endl;
 
 		 __do_mtm(alloc_orders[alloc_id]);
 

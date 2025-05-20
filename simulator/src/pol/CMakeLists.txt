@@ -1,6 +1,6 @@
 project(pol)
 
-file(GLOB SOURCES an.cpp at.cpp)
+file(GLOB SOURCES an.cpp at.cpp mtm.cpp)
 
 add_library(${PROJECT_NAME} OBJECT ${SOURCES})
 
