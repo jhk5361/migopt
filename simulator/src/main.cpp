@@ -23,9 +23,7 @@
 #include "mtm.h"
 //#include "mcmf.h" // for testing
 //#include "analysis.h"
-
 using namespace std;
-
 
 enum trace_type get_type(string &str) {
 	string sub_str = str.substr(0,10);
@@ -243,6 +241,7 @@ void get_sim_conf(const char *cfg_file, struct sim_cfg &scfg) {
 		for (int i = 0; i < count; i++) {
 			config_setting_t *lat = config_setting_get_elem(setting, i); 
 			scfg.tier_lat_4KB_reads[i] =  config_setting_get_int(lat);
+			scfg.tier_lat_4KB_reads[i] *= scfg.mig_overhead / 10000;
 		}
 	}
 	setting = config_lookup(&cfg, "tier_lat_4KB_writes");
@@ -255,6 +254,7 @@ void get_sim_conf(const char *cfg_file, struct sim_cfg &scfg) {
 		for (int i = 0; i < count; i++) {
 			config_setting_t *lat = config_setting_get_elem(setting, i); 
 			scfg.tier_lat_4KB_writes[i] =  config_setting_get_int(lat);
+			scfg.tier_lat_4KB_writes[i] *= scfg.mig_overhead / 10000;
 		}
 	}
 

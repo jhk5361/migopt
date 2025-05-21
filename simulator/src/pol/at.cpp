@@ -538,6 +538,15 @@ void print_at_sched () {
 }
 
 void print_at() {
+	cout << "==========================\n";
+	cout << "Printing AT stats\n";
+	cout << "mode: " << my_at->mode << endl;
+	cout << "alloc order: ";
+	for (int i = 0; i < my_at->nr_tiers; i++) {
+		cout << my_at->alloc_order[i] << " ";
+	}
+	cout << endl;
+
 	cout << "lat_acc lat_mig lat_alc" << endl;
 	cout << my_at->perf.lat_acc << " " << my_at->perf.lat_mig <<  " " << my_at->perf.lat_alc << endl; 
 
@@ -570,13 +579,6 @@ void do_at() {
 	vector<vector<int>> alloc_orders = {{0,2,1,3}, {1,0,2,3}, {2,0,1,3}, {0,1,2,3}};
 
 	for (int alloc_id = 0; alloc_id < alloc_orders.size(); alloc_id++) {
-		cout << "alloc order: ";
-		for (int i = 0; i < alloc_orders[alloc_id].size(); i++) {
-			cout << alloc_orders[alloc_id][i] << " ";
-		}
-		cout << endl;
-
-
 		 __do_at(alloc_orders[alloc_id]);
 
 		print_at();

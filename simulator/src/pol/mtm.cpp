@@ -409,6 +409,15 @@ void print_mtm_sched () {
 }
 
 void print_mtm() {
+	cout << "==========================\n";
+	cout << "Printing MTM stats\n";
+	cout << "mode: " << my_mtm->mode << endl;
+	cout << "alloc order: ";
+	for (int i = 0; i < my_mtm->nr_tiers; i++) {
+		cout << my_mtm->alloc_order[i] << " ";
+	}
+	cout << endl;
+
 	cout << "lat_acc lat_mig lat_alc" << endl;
 	cout << my_mtm->perf.lat_acc << " " << my_mtm->perf.lat_mig <<  " " << my_mtm->perf.lat_alc << endl; 
 
@@ -441,13 +450,6 @@ void do_mtm() {
 	vector<vector<int>> alloc_orders = {{0,2,1,3}, {1,0,2,3}, {2,0,1,3}, {0,1,2,3}};
 
 	for (int alloc_id = 0; alloc_id < alloc_orders.size(); alloc_id++) {
-		//print alloc orders
-		cout << "alloc order: ";
-		for (int i = 0; i < alloc_orders[alloc_id].size(); i++) {
-			cout << alloc_orders[alloc_id][i] << " ";
-		}
-		cout << endl;
-
 		 __do_mtm(alloc_orders[alloc_id]);
 
 		print_mtm();
