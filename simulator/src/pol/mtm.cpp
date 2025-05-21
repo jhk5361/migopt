@@ -338,7 +338,7 @@ void *__do_mtm (vector<int> &alloc_order) {
 			}
 		}
 
-		if (i != 0 && (i % my_mtm->mig_period * 2) == 0) {
+		if (i != 0 && (i % (my_mtm->mig_period * 2)) == 0) {
 			cool_hist();
 		}
 	}
