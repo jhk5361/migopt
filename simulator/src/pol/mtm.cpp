@@ -258,6 +258,8 @@ static list<struct mtm_page *> scan_hist_for_promo() {
 	for (auto it = my_mtm->hist.rbegin(); it != my_mtm->hist.rend(); ++it) {
 		if (it->second.size() == 0) continue;
 
+		// bin_item.first is the addr
+		// bin_item.second is the page
 		for (auto &bin_item : it->second) {
 			if (promo_nr_scan >= my_mtm->tiers[promo_target].cap) {
 				promo_target++;
