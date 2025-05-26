@@ -96,6 +96,10 @@ static void add_default_meta_nodes_edges() {
 	add_edge(get_nidx(LAYER_DEF_META, my_migopt.cap_choke_nidx), e);
 }
 
+static inline get_period_idx(int idx) {
+	return (idx - 1) / my_migopt.mig_period * my_migopt.mig_period;
+}
+
 void init_migopt(struct sim_cfg &scfg) {
 	my_migopt.nr_traces = scfg.nr_sampled_traces;
 	my_migopt.nr_tiers = scfg.nr_tiers;
@@ -159,6 +163,8 @@ void set_prev_access_idx(uint64_t addr, int idx) {
 
 void migopt_add_trace(struct trace_req &t) {
 	static int cur_idx = 1;
+
+	// 1-indexed
 
 	if (cur_idx >= my_migopt.nr_traces) {
 		printf("Too many traces, current: %d, max: %d\n", cur_idx, my_migopt.nr_traces);
@@ -291,12 +297,13 @@ static void add_reclaimed_edges(int idx) {
 	e = init_edge(get_nidx(LAYER_DEMO_CHOKE, idx), get_nidx(LAYER_PROMO, idx), INT_MAX, 0, 0, EDGE_RECLAIMED);
 	add_edge(get_nidx(LAYER_DEMO_CHOKE, idx), e);
 
-	if (idx + my_migopt.mig_period < traces.size()) {
+	if (idx + my_migopt.mig_period < my_migopt.nr_traces) {
 		// add the reclaimed edge to the next interval's demo choke nodes
 		e = init_edge(get_nidx(LAYER_DEMO_CHOKE, idx), get_nidx(LAYER_DEMO_CHOKE, idx + my_migopt.mig_period), INT_MAX, 0, 0, EDGE_RECLAIMED);
 	} else {
 		// if there is no next interval, we just add the reclaimed edge to the sink node
 		e = init_edge(get_nidx(LAYER_DEMO_CHOKE, idx), my_migopt.sink_nidx, INT_MAX, 0, 0, EDGE_RECLAIMED);
+		// TODO:: add to the sink node, must add the edge to the figure
 	}
 	add_edge(get_nidx(LAYER_DEMO_CHOKE, idx), e);
 }
@@ -310,11 +317,11 @@ static void add_promo_choke_edges(int idx) {
 static void add_retention_edges(int idx) {
 	struct migopt_trace_req &mt = traces[idx];
 	int prev_idx = mt.prev_idx;
-	if (prev_idx == INVALID || mt.is_p_last) return; // no previous access, so no retention edges
+	if (prev_idx == INVALID) return; // no previous access, so no retention edges
 
-	if (mt.is_g_last) {
-		printf("Current access is the last access, so no retention edges\n");
-		abort();
+	if (is_diff_mig_period(prev_idx, idx)) {
+		// if the previous access is on a different mig period, we do not add the retention edges
+		return;
 	}
 
 	struct edge e;
@@ -364,9 +371,9 @@ static void add_alloc_reward_edges() {
 	int cost;
 	// subtract the latency of the bottom tier
 	// because we assumed the base allocation is done on the bottom tier
-	cost = -my_migopt.tier_lat_4KB_writes[my_migopt.bottom_tier] - my_migopt.tier_lat_4KB_reads[my_migopt.bottom_tier];
-	e = init_edge(get_nidx(LAYER_ALLOC, idx), get_nidx(LAYER_FIRST, idx), 1, cost, 0, EDGE_ALLOC_REWARD);
-	add_edge(get_nidx(LAYER_ALLOC, idx), e);
+	cost = -my_migopt.tier_lat_4KB_writes[my_migopt.bottom_tier];
+	e = init_edge(get_nidx(LAYER_ALLOC, get_period_idx(idx)), get_nidx(LAYER_FIRST, idx), 1, cost, 0, EDGE_ALLOC_REWARD);
+	add_edge(get_nidx(LAYER_ALLOC, get_period_idx(idx)), e);
 }
 
 static void add_promo_edges(int idx) {
@@ -386,8 +393,8 @@ static void add_promo_edges(int idx) {
 	// because there is a 4KB write latency for the allocation on the allocation edge,
 	// we need to add only the 4KB read latency of the bottom tier
 	cost = my_migopt.tier_lat_4KB_reads[my_migopt.bottom_tier];
-	e = init_edge(get_nidx(LAYER_PROMO_CHOKE, idx), get_nidx(LAYER_FIRST, idx), 1, cost, 0, EDGE_PROMO);
-	add_edge(get_nidx(LAYER_PROMO_CHOKE, idx), e);
+	e = init_edge(get_nidx(LAYER_PROMO_CHOKE, get_period_idx(idx)), get_nidx(LAYER_FIRST, idx), 1, cost, 0, EDGE_PROMO);
+	add_edge(get_nidx(LAYER_PROMO_CHOKE, get_period_idx(idx)), e);
 }
 
 static void add_demo_edges(int idx) {
@@ -398,12 +405,18 @@ static void add_demo_edges(int idx) {
 		return;
 	}
 
+	if (get_period_idx(idx) + my_migopt.mig_period >= my_migopt.nr_traces) {
+		// if the current access is the last access of the global,
+		// we do not add the demo edges because there is no next access to demo
+		return;
+	}
+
 	struct edge e;
 	int cost;
 	for (int tier = 0; tier < my_migopt.nr_tiers - 1; tier++) {
 		// we assum the demo always directly goes to the bottom tier
 		cost = my_migopt.tier_lat_4KB_reads[tier] + my_migopt.tier_lat_4KB_writes[my_migopt.bottom_tier]; 
-		e = init_edge(get_nidx(LAYER_ACCESS, idx, tier), get_nidx(LAYER_DEMO, idx), 1, cost, 0, EDGE_DEMO, tier);
+		e = init_edge(get_nidx(LAYER_ACCESS, idx, tier), get_nidx(LAYER_DEMO, get_period_idx(idx) + my_migopt.mig_period), 1, cost, 0, EDGE_DEMO, tier);
 		add_edge(get_nidx(LAYER_ACCESS, idx, tier), e);
 	}
 }
@@ -454,7 +467,7 @@ static void add_interval_retention_edges(int idx) {
 }
 
 void build_migopt_graph () {
-	for (int i = 0; i <= traces.size(); i++) {
+	for (int i = 0; i <= my_migopt.nr_traces; i++) {
 		if (i == 0) { // there is no trace at the "index 0", so we just add the default meta nodes and edges
 			// add the default meta nodes and edges for the first interval
 			add_default_meta_nodes_edges();
@@ -471,7 +484,7 @@ void build_migopt_graph () {
 		add_end_nodes(i);
 		add_interval_retention_nodes(i);
 
-		if (is_idx_on_mig_period(i) && (i != 1) && (i < (traces.size()))) {
+		if (is_idx_on_mig_period(i) && (i > 0) && (i < my_migopt.nr_traces)) {
 			add_alloc_nodes(i);
 			add_demo_nodes(i);
 			add_demo_choke_nodes(i);
@@ -595,6 +608,9 @@ static inline void migopt_update_item_sched(uint64_t addr, int period, int layer
 	migopt.item_sched[addr][period][I_LAYER] = layer;
 	migopt.item_sched[addr][period][I_TYPE] = type;
 }
+
+
+// belows should be reviewed
 
 void migopt_analysis_graph(int iter) {
 	struct node *cur;
