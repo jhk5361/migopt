@@ -65,17 +65,50 @@ static inline int get_layer_from_tier(int tier) {
 
 int get_nidx (int layer, int idx, int tier = INVALID) {
 	if (layer == LAYER_ACCESS)
-		return get_layer_from_tier(tier) * my_migopt.nr_traces + idx;
-	return layer * my_migopt.nr_traces + idx;
+		return get_layer_from_tier(tier) * (my_migopt.nr_traces + 1) + idx;
+	return layer * (my_migopt.nr_traces + 1) + idx;
 }
+
+int get_tier_from_nidx(int nidx) {
+    int nr_traces = my_migopt.nr_traces;
+    int nr_tiers = my_migopt.nr_tiers;
+    int layer = nidx / (nr_traces + 1);
+    
+    if (layer < NUM_META_LAYERS || layer > NUM_META_LAYERS + nr_tiers - 2) {
+        abort();
+    }
+    
+    int tier = (NUM_META_LAYERS + nr_tiers) - layer - 2;
+    
+    if (tier < 0 || tier >= nr_tiers - 1) {
+        abort();
+    }
+    
+    return tier;
+}
+
 
 int get_nr_nodes(int nr_traces, int nr_tiers) {
 	// [blank] --- 	top tier nodes	 	--- [blank]
 	// [blank] ---       ... 			---	[blank]
 	// [blank] --- 	bottom tier nodes 	--- [blank]
-	// L1 : [access] [demo] [promo] [alloc] [demo_bar] [promo_bar]
+	// ...
 	// L0 : [source] [choke] [sink]
 	return (nr_traces + 1) * (NUM_LAYERS + nr_tiers - 1);
+}
+
+static inline int get_nr_period() {
+	// Calculate the number of periods based on the number of traces and the migration period
+	if (my_migopt.mig_period <= 0) {
+		printf("Migration period must be greater than 0\n");
+		abort();
+	}
+	if (my_migopt.nr_traces <= 0) {
+		printf("Number of traces must be greater than 0\n");
+		abort();
+	}
+
+	return (my_migopt.nr_traces - 1) / my_migopt.mig_period + 1;
 }
 
 // add source, cap choke, and sink nodes
@@ -104,7 +137,8 @@ void init_migopt(struct sim_cfg &scfg) {
 	my_migopt.nr_traces = scfg.nr_sampled_traces;
 	my_migopt.nr_tiers = scfg.nr_tiers;
 	my_migopt.nr_nodes = get_nr_nodes(my_migopt.nr_traces, scfg.nr_tiers);
-	my_migopt.do_migopt = scfg.do_migopt;
+	my_migopt.mode = scfg.do_migopt;
+	my_migopt.sched_file = scfg.sched_file;
 
 	my_migopt.mig_period = scfg.mig_period;
 	my_migopt.mig_traffic = scfg.mig_traffic == -1 ? INT_MAX : scfg.mig_traffic;
@@ -116,8 +150,6 @@ void init_migopt(struct sim_cfg &scfg) {
 		my_migopt.tier_lat_4KB_reads[i] = tier_lat_4KB_reads[i];
 		my_migopt.tier_lat_4KB_writes[i] = tier_lat_4KB_writes[i];
 	}
-
-	my_migopt.sched_file = scfg.sched_file;
 
 	my_migopt.source_nidx = 0;
 	my_migopt.cap_choke_nidx = 1;
@@ -510,12 +542,12 @@ void build_migopt_graph () {
 
 static void add_rgraph_node(int node_num) {
 	struct node *cur = migopt.nodes + node_num;
-	migopt.rgraph.add_node(cur->layer, cur->addr, cur->type, cur->type);
+	my_migopt.rgraph.add_node(cur->layer, cur->addr, cur->type, cur->type);
 }
 
 static void add_rgraph_edge(int node_num, struct edge &e) {
 	if (node_num != e.start) abort();
-	migopt.rgraph.add_arc(e.start, e.next, e.cap, e.cost, e.flow, e.type, e.associated_tier);
+	my_migopt.rgraph.add_arc(e.start, e.next, e.cap, e.cost, e.flow, e.type, e.associated_tier);
 }
 
 static void generate_rgraph() {
@@ -573,8 +605,293 @@ static void remove_rgraph(int tier) {
 
 static inline void update_source_cap(int capacity, int used) {
 	printf("Update cap: %d\n", capacity);
+	// hard coded: 0 is the capacity choke edge
 	migopt.rgraph.arcs_[0].flow = 0;
 	migopt.rgraph.arcs_[0].cap = capacity - used;
+}
+
+
+static inline void update_item_sched(uint64_t addr, int period, int tier) {
+	int org_tier = my_migopt.item_sched[addr][period];
+
+	if (tier == my_migopt.bottom_tier && org_tier != INVALID)
+		return;
+
+	if (tier != my_migopt.bottom_tier && org_tier != INVALID) {
+		printf("Item sched for address %lx at period %d is already set to tier %d, cannot update to tier %d\n", addr, period, org_tier, tier);
+		abort();
+	}
+
+	migopt.item_sched[addr][period] = tier;
+}
+
+
+// Case 1: init item_sched for the first access of the address
+// Case 2: update item_sched for the address when the alloc edge has a flow
+// Case 3: update item_sched for the next period when a demo edge has a flow
+void fill_item_sched(int iter) {
+	struct node *cur;
+	int idx, period;
+	uint64_t addr;
+	static unordered_set<uint64_t> g_first;
+	int nr_period = get_nr_period();
+
+	for (int i = 1; i <= my_migopt.nr_traces; i++) {
+
+		idx = get_nidx(LAYER_TIER_CHOKE, idx);
+		cur = &my_migopt.rgraph.nodes_[idx];
+
+		if (cur->connected_arcs_.size() != 0) {
+			addr = traces[i].addr;
+			
+			if (addr != cur->req.addr) {
+				printf("Address mismatch: %lx != %lx\n", addr, cur->req.addr);
+				abort();
+			}
+
+			// when the address is first accessed globaly,
+			// we initialize the item_sched for the address
+			// the baseline tier is the bottom tier
+			if (g_first.find(addr) == g_first.end()) {
+				g_first.insert(addr);
+				my_migopt.item_sched.insert({addr, vector<int>(nr_period, -1)});	
+				update_item_sched(addr, period, my_migopt.bottom_tier);
+			}
+
+			// if a edge which is connected to the tier choke node
+			// has a flow, we update the item_sched for the address
+			// the tier is the associated tier of the edge
+			for (edge *e : my_migopt.rgraph.nodes_[idx].connected_arcs_) {
+				if (e->flow == 0 || e->start != idx)
+					continue;
+
+				int tier = get_tier_from_nidx(e->next);
+				if (tier != e.associated_tier) {
+					printf("Tier mismatch: %d != %d (assoc)\n", tier, e->associated_tier);
+					abort();
+				}
+
+				if (tier != iter) {
+					printf("Tier mismatch: %d != %d (iter)\n", tier, iter);
+					abort();
+				}
+	
+				if (my_migopt.item_sched.find(addr) == my_migopt.item_sched.end()) {
+					abort();
+				}
+
+				update_item_sched(addr, period, tier);
+ 			}
+		}
+
+		// if a demotion edge's flow is not zero,
+		// we update the item_sched for the address to the bottim tier
+		// if the tier already filled, we do not update it
+		idx = get_nidx(LAYER_DEMO, idx);
+		cur = &my_migopt.rgraph.nodes_[idx];
+		if (cur->connected_arcs_.size() != 0) {
+			for (edge *e : my_migopt.rgraph.nodes_[idx].connected_arcs_) {
+				if (e->flow == 0 || e->next != idx)
+					continue;
+
+				if (e->start <= (my_migopt.nr_traces * NUM_META_LAYERS))
+					continue;
+	
+				if (e->type != EDGE_DEMO)
+					abort();
+	
+				addr = migopt.rgraph.nodes_[e->start].req.addr;
+
+				update_item_sched(addr, period + 1, migopt.bottom_tier);
+			}
+		}
+	}
+}
+
+void fill_gaps_in_item_sched() {
+	int nr_period = get_nr_period();
+	// fill the gaps in the item_sched
+	// if an item is not scheduled in a period, we fill it with the previous tier
+	for (auto &item_vec : my_migopt.item_sched) {
+		for (int i = 1; i < nr_period; i++) {
+			if (item_vec.second[i] == INVALID) {
+				item_vec.second[i] = item_vec.second[i-1];
+			}
+		}
+	}
+}
+
+vector<vector<int>> get_tier_size_per_period() {
+	int nr_period = get_nr_period();
+	int tier;
+	vector<vector<int>> tier_size_per_period(nr_period, vector<int>(my_migopt.nr_tiers, 0));
+
+	for (auto &item_vec : my_migopt.item_sched) {
+		for (int i = 0; i < nr_period; i++) {
+			tier = item_vec.second[i];
+			if (tier != INVALID) {
+				tier_size_per_period[i][tier]++;
+			}
+		}
+	}
+
+	return tier_size_per_period;
+}
+
+vector<int> get_room_per_tier(vector<vector<int>> &tier_size_per_period) {
+	int nr_period = get_nr_period();
+	vector<int> room_per_tier(my_migopt.nr_tiers, 0);
+
+	for (int i = 0; i < my_migopt.nr_tiers; i++) {
+		int tier_max = tier_size_per_period[0][i];
+		for (int j = 0; j < nr_period; j++) {
+			tier_max = std::max(tier_max, tier_size_per_period[j][i]);
+		}
+		room_per_tier[i] = my_migopt.tier_cap[i] - tier_max;
+	}
+
+	return room_per_tier;
+}
+
+vector<unordered_map<uint64_t, int>> get_remain_pages_in_bottom_tier() {
+	int nr_period = get_nr_period();
+	vector<unordered_map<uint64_t, int>> remain_pages(nr_period, unordered_map<uint64_t, int>());
+
+	bool scan_done;
+
+	for (auto &item_vec : my_migopt.item_sched) {
+		scan_done = false;
+
+		for (int i = 1; i < nr_period; i++) {
+			if (item_vec.second[i] == my_migopt.bottom_tier) {
+				int prev_layer = item_vec.second[i-1];
+
+				// if a demotion occurs at this period and the dst tier is the bottom tier,
+				if (prev_layer >= 0 && prev_layer < my_migopt.bottom_tier) {
+					
+
+					// if the item remains in the bottom tier for the rest of the periods,
+					// we can just add it to the remain pages
+					bool remain_in_last_tier = true;
+					for (int j = i; j < nr_period; j++) {
+						if (item_vec.second[j] != my_migopt.bottom_tier) {
+							remain_in_last_tier = false;
+							break;
+						}
+					}
+
+					if (remain_in_last_tier) {
+						remain_pages[i].insert({item_vec.first, prev_layer});
+						scan_done = true;
+						break; // no need to scan further, we found the remain page in the bottom tier
+					}
+				}
+			}
+			if (scan_done) {
+				break;
+			}
+		}
+	}
+
+	return remain_pages;
+}
+
+void move_pages_in_bottom_tier(vector<unordered_map<uint64_t, int>> &remain_pages, vector<vector<int>> &tier_size_per_period) {
+	int nr_period = get_nr_period();
+	vector<unordered_map<uint64_t, int>> moving_pages(nr_period, unordered_map<uint64_t, int>());
+
+	for (int i = nr_period - 1; i >= 0; i--) {
+		if (remain_pages[i].empty()) continue;
+
+		// find the minimum room available in the bottom tier from period i to the end
+		int min_room = INT_MAX;
+		for (int j = i; j < nr_period; j++) {
+			min_room = std::min(min_room, my_migopt.tier_cap[my_migopt.bottom_tier] - tier_size_per_period[j][my_migopt.bottom_tier]);
+		}
+
+		// if there is enough room in the bottom tier, we do not need to move any pages
+		if (min_room >= 0) continue;
+
+		// if there is not enough room in the bottom tier, we need to move some pages
+		// we can only move pages that are demoted to the bottom tier and remain there
+		// we can move at most -min_room pages from the bottom tier to the upper tiers
+		int need_to_move = std::min(int(remain_pages[i].size()), -min_room);
+
+		while(need_to_move--) {
+			auto cand = remain_pages[i].begin();
+			int prev_tier = cand->second;
+
+			// we need to find a tier that is lower or equal to the previous tier
+			for (int dst = my_migopt.bottom_tier - 1; dst >= 0; dst--) {
+				if (prev_tier <= dst && room_per_tier[dst] > 0) {
+					// we found a tier to move the page
+					for (int j = i; j < nr_period; j++) {
+						tier_size_per_period[j][my_migopt.bottom_tier]--;
+						tier_size_per_period[j][dst]++;
+						my_migopt.item_sched[cand->first][j] = dst; // update the item_sched for the address
+					}
+					remain_pages[i].erase(cand);
+					room_per_tier[dst]--; // decrease the room available in the destination tier
+					break;
+				}
+			}
+		}
+	}
+}
+
+void move_items_from_bottom_tier() {
+	int nr_period = get_nr_period();
+	int tier;
+
+	// tier_size_per_period is a 2D vector that stores the size of each tier for each period
+	vector<vector<int>> tier_size_per_period = get_tier_size_per_period();
+
+	// get the room available in each tier
+	// room indicates the minimum number of available slots in each tier
+	vector<int> room_per_tier = get_room_per_tier(tier_size_per_period);
+
+	// get remain pages in the bottom tier
+	// remain_pages[i] means the pages that remain in the bottom tier from period i to the end
+	// this map holds the pages are demoted to the bottom tier and remain there
+	// map key is the address, value is the previous tier
+	vector<unordered_map<uint64_t, int>> remain_pages = get_remain_pages_in_bottom_tier();
+
+	// move pages from the bottom tier to the upper tiers
+	move_pages_in_bottom_tier(remain_pages, tier_size_per_period);
+}
+
+void post_process_item_sched() {
+	fill_gaps_in_item_sched();
+
+	move_items_from_bottom_tier();
+}
+
+void print_migopt_sched() {
+	// set sched file name
+	string output_file = my_migopt->sched_file;
+	output_file = output_file + ".migopt_mode" + to_string(my_migopt->mode) + ".sched";
+
+	ofstream writeFile(output_file.c_str());
+
+	// generate migration schedule 
+	int nr_period = get_nr_period();
+	vector<map<uint64_t,int>> mig_sched = vector(nr_period, map<uint64_t,int>());
+
+	for (auto &item_vec : my_migopt.item_sched) {
+		for (i = 0; i < migopt.nr_period; i++) {
+			if (item_vec.second[i] != INVALID)
+				mig_sched[i][item_vec.first] = item_vec.second[i];
+		}
+	}
+
+	for (int i = 0; i < nr_period; i++) {
+		for (auto item: mig_sched[i]) {
+				writeFile << "A " << i * my_an->mig_period << " " << item.first << " " << item.second << " " << 0 << "\n";
+		}
+	}
+
+	fflush(stdout);
+	writeFile.close();
 }
 
 void do_migopt() {
@@ -583,355 +900,33 @@ void do_migopt() {
 	generate_rgraph();
 
 	uint64_t sum_cost = 0, sum_flow = 0;
-	for (int i = 0; i < migopt.nr_tiers - 1; i++) {
-		printf("Round %d\n", i);
-		update_source_cap(migopt.tier_cap[i], 0);
-		//print_rgraph();
+	for (int iter = 0; iter < migopt.nr_tiers - 1; iter++) {
+		printf("ITER %d\n", i);
+		update_source_cap(migopt.tier_cap[iter], 0);
 		auto result = migopt.rgraph.min_cost_max_flow(migopt.source_nidx, migopt.sink_nidx);
-		sum_cost += result[0];
-		sum_flow += result[1];
-		printf("Round %d, min cost: %ld, max flow: %ld\n", i, sum_cost, sum_flow);
-		//printf("Estimated min cost: %lld, max flow: %d\n", result[0] * MCMF_SAMPLE / migopt.sample, result[1]);
 		printf("Estimated min cost: %d, max flow: %d\n", result[0], result[1]);
-		migopt_analysis_graph(i);
-		remove_rgraph(i);
-
+		fill_item_sched(iter);
+		post_process_item_sched()
+		remove_rgraph(iter);
+		//print_rgraph();
+		//printf("Estimated min cost: %lld, max flow: %d\n", result[0] * MCMF_SAMPLE / migopt.sample, result[1]);
 	}
 
-	migopt_print_cache_sched();
+	print_migopt_sched();
 }
 
-static inline void migopt_update_item_sched(uint64_t addr, int period, int layer, int type) {
-	if (type == 3 && migopt.item_sched[addr][period][I_LAYER] != -1)
-		return;
-
-	migopt.item_sched[addr][period][I_LAYER] = layer;
-	migopt.item_sched[addr][period][I_TYPE] = type;
-}
-
-
-// belows should be reviewed
-
-void migopt_analysis_graph(int iter) {
-	struct node *cur;
-	int idx;
-	int next_layer;
-	int period;
-	uint64_t addr;
-	int type;
-	int period_items = 0;
-
-	for (int i = 1; i <= migopt.nr_traces; i++) {
-		if (((i-1) % migopt.mig_period) == 0) {
-			period = (i-1) / migopt.mig_period;
-			if (period_items > migopt.tier_cap[migopt.bottom_tier - iter])
-				printf("이상해 %d\n", period_items);
-			period_items = 0;
-		}
-
-		idx = (migopt.nr_traces * L_AGGR_BAR) + i;
-		if (migopt.rgraph.nodes_[idx].connected_arcs_.size() != 0) {
-			type = -1;
-			addr = migopt.rgraph.nodes_[idx].addr;
-
-			if (migopt.g_first.find(addr) == migopt.g_first.end()) {
-				migopt.g_first.insert(addr);
-				migopt.item_sched.insert({addr, vector<vector<int>>(migopt.nr_period, vector<int>(NR_ITEM_SCHED, -1))});	
-				migopt_update_item_sched(addr, period, migopt.bottom_tier, -1);
-			}
-
-			for (edge *e : migopt.rgraph.nodes_[idx].connected_arcs_) {
-				if (e->flow == 0 || e->start != idx)
-					continue;
-				next_layer = (e->next - 1) / migopt.nr_traces - NUM_META_L + 1;
-
-				int asd = 0;
-				for (edge *from_e : migopt.rgraph.nodes_[idx - (migopt.nr_traces * (L_AGGR_BAR - L_AGGR))].connected_arcs_) {
-					if (from_e->flow == 0 || from_e->type == E_AGGR_BAR)
-						continue;
-					asd++;
-					if (from_e->type == E_ALLOC)
-						type = 0;
-					else if (from_e->type == E_PROMO)
-						type = 1;
-					else if (from_e->type == E_HIT)
-						type = 2;
-					else
-						abort();
-				}
-				if (asd > 1)
-					abort();
-
-				next_layer = migopt.nr_tiers - next_layer - 1;
-	
-				addr = migopt.rgraph.nodes_[e->next].addr;
-				period_items++;
-	
-				if (migopt.item_sched.find(addr) == migopt.item_sched.end()) {
-					abort();
-				}
-
-				migopt_update_item_sched(addr, period, next_layer, type);
-			}
-		}
-
-		idx = (migopt.nr_traces * L_DEMO) + i;
-		if (migopt.rgraph.nodes_[idx].connected_arcs_.size() != 0) {
-			for (edge *e : migopt.rgraph.nodes_[idx].connected_arcs_) {
-				if (e->flow == 0 || e->next != idx)
-					continue;
-
-				if (e->start < (migopt.nr_traces * NUM_META_L))
-					continue;
-	
-				if (e->type != E_DEMO)
-					abort();
-	
-				addr = migopt.rgraph.nodes_[e->start].addr;
-				if (period + 1 >= migopt.nr_period)
-					abort();
-
-				migopt_update_item_sched(addr, period + 1, migopt.bottom_tier, 3);
-			}
-		}
-	}
-}
-
-void migopt_print_cache_sched() {
-	int i, j;
-	int idx;
-	int nr_demo_pages = 0, nr_promo_pages = 0;
-	vector<int> nr_alloc(migopt.nr_tiers, 0);
-
-	for (i = 1; i < migopt.nr_traces; i++) {
-		if ((i % migopt.mig_period) == 0) {
-			idx = migopt.nr_traces * L_DEMO_BAR + i;
-			if (migopt.rgraph.nodes_[idx].connected_arcs_.size() == 0) // empty nodes
-				continue; 
-			for (edge *e : migopt.rgraph.nodes_[idx].connected_arcs_) {
-				if (e->flow == 0 || e->next != idx)
-					continue;
-
-				if (e->type != E_DEMO_BAR)
-					continue;
-
-				nr_demo_pages += e->flow;
-			}
-
-			idx = migopt.nr_traces * L_PROMO_BAR + i;
-			if (migopt.rgraph.nodes_[idx].connected_arcs_.size() == 0) // empty nodes
-				continue; 
-			for (edge *e : migopt.rgraph.nodes_[idx].connected_arcs_) {
-				if (e->flow == 0 || e->next != idx)
-					continue;
-
-				if (e->type != E_PROMO_BAR)
-					abort();
-
-				nr_promo_pages += e->flow;
-			}
-		}
-	}
-
-	struct remain_addr {
-		int prev_layer;
-		uint64_t addr;
-	};
-
-	vector<vector<int>> tier_size_per_period(migopt.nr_period, vector<int>(migopt.nr_tiers, 0));
-
-	for (auto &item_vec : migopt.item_sched) {
-		for (i = 1; i < migopt.nr_period; i++) {
-			if (item_vec.second[i][I_LAYER] == -1) {
-				item_vec.second[i][I_LAYER] = item_vec.second[i-1][I_LAYER];
-			}
-		}
-		
-		for (i = 0; i < migopt.nr_period; i++) {
-			if (item_vec.second[i][I_LAYER] != -1) {
-				tier_size_per_period[i][item_vec.second[i][I_LAYER]]++;
-			}
-		}
-	}
-
-	printf("ITEM SCHED\n");
-	for (auto &item_vec : migopt.item_sched) {
-		printf("%ld: ", item_vec.first);
-		for (i = 0; i < migopt.nr_period; i++) {
-			printf("(%d) %d ", i, item_vec.second[i][I_LAYER]);
-		}
-		printf("\n");
-	}
-
-	vector<int> room_per_tier(migopt.nr_tiers, 0);
-	vector<int> max_per_tier(migopt.nr_tiers, 0);
-	vector<int> min_per_tier(migopt.nr_tiers, 0);
-
-	printf("LAST TIER CAP: %d, SIZE: %d\n", migopt.tier_cap[0], tier_size_per_period[migopt.nr_period-1][migopt.nr_tiers-1]);
-	for (i = 0; i < migopt.nr_tiers; i++) {
-		printf("Tier %d: ", i);
-		int tier_max = tier_size_per_period[0][i];
-		int tier_min = tier_size_per_period[0][i];
-		for (int j = 0; j < migopt.nr_period; j++) {
-			tier_max = std::max(tier_max, tier_size_per_period[j][i]);
-			tier_min = std::min(tier_min, tier_size_per_period[j][i]);
-			printf("%d(%d) ", j, tier_size_per_period[j][i]);
-		}
-		room_per_tier[i] = migopt.tier_cap[migopt.nr_tiers - 1 - i] - tier_max;
-		max_per_tier[i] = tier_max;
-		min_per_tier[i] = tier_min;
-		printf("max: %d, min: %d, room: %d\n", tier_max, tier_min, room_per_tier[i]);
-	}
-
-	
-
-
-	bool scan_done;
-
-	vector<unordered_map<uint64_t,int>> remain_pages(migopt.nr_period, unordered_map<uint64_t,int>());
-	vector<unordered_map<uint64_t,int>> moving_pages(migopt.nr_period, unordered_map<uint64_t,int>());
-
-	for (auto &item_vec : migopt.item_sched) {
-		scan_done = false;
-		for (i = 1; i < migopt.nr_period; i++) {
-			if (scan_done) break;
-
-			if (item_vec.second[i][I_LAYER] == migopt.nr_tiers - 1) {
-				scan_done = true;
-				int prev_layer = item_vec.second[i-1][I_LAYER];
-				if (prev_layer != -1 && prev_layer < migopt.nr_tiers - 1) {
-					bool remain_in_last_tier = true;
-					for (int j = i; j < migopt.nr_period; j++) {
-						if (item_vec.second[j][I_LAYER] != migopt.nr_tiers - 1) {
-							remain_in_last_tier = false;
-							break;
-						}
-					}
-					if (remain_in_last_tier) {
-						//nr_remain_pages[i]++;
-						remain_pages[i].insert({item_vec.first, prev_layer});
-					}
-				}
-			}
-		}
-	}
-
-
-	printf("Remain: ");
-	for (i = 0; i < migopt.nr_period; i++) {
-		printf("%d(%ld) ", i, remain_pages[i].size());
-	}
-	printf("\n");
-
-	for (i = 0; i < migopt.nr_period; i++) {
-		if (tier_size_per_period[i][migopt.nr_tiers - 1] == max_per_tier[migopt.nr_tiers - 1])
-			break;
-	}
-
-	int moving_cnt = 0;
-
-	for (i = migopt.nr_period - 1; i >= 0; i--) {
-		int min_room = INT_MAX;
-		if (remain_pages[i].empty())
-			continue;
-
-		for (int j = i; j < migopt.nr_period; j++) {
-			min_room = std::min(min_room, migopt.tier_cap[0] - tier_size_per_period[j][migopt.nr_tiers - 1]);
-		}
-
-		printf("period: %d, min_room: %d, ", i, min_room);
-
-		if (min_room >= 0)
-			continue;
-
-		int need_to_move = std::min(int(remain_pages[i].size()), -min_room);
-
-
-		printf("need_to_move: %d\n", need_to_move);
-
-		while(need_to_move--) {
-			auto first_item = remain_pages[i].begin();
-			for (int j = migopt.nr_tiers - 2; j >= 0; j--) {
-				if (first_item->second <= j) {
-					for (int k = i; k < migopt.nr_period; k++) {
-						tier_size_per_period[k][migopt.nr_tiers - 1]--;
-					}
-					moving_pages[i].insert({first_item->first, first_item->second});
-					remain_pages[i].erase(first_item);
-					moving_cnt++;
-					break;
-				}
-			}
-		}
-	}
-
-	printf("Moving: %d\n", moving_cnt);
-	for (i = 0; i < migopt.nr_period; i++) {
-		printf("%d(%ld) ", i, moving_pages[i].size());
-	}
-	printf("\n");
-
-	for (i = 0; i < migopt.nr_period; i++) {
-		while(moving_pages[i].size()) {
-			auto first_item = moving_pages[i].begin();
-			for (int j = migopt.nr_tiers - 2; j >= 0; j--) {
-				if (room_per_tier[j] > 0 && first_item->second <= j) {
-					for (int k = i; k < migopt.nr_period; k++) {
-						tier_size_per_period[k][j]++;
-						migopt.item_sched[first_item->first][k][I_LAYER] = j;
-					}
-					if (first_item->first == 30018) {
-						printf("MOVING 30018 period: %d, from: %d, to: %d\n", i, first_item->second, j);
-
-					}
-					moving_pages[i].erase(first_item);
-					room_per_tier[j]--;
-					break;
-				}
-			}
-		}
-	}
-	
-		// build the cache sched of the item;
-		for (i = 0; i < migopt.nr_period; i++) {
-			if (item_vec.second[i][I_LAYER] != -1)
-				migopt.cache_sched[i][item_vec.second[i][I_LAYER]].insert({item_vec.first, item_vec.second[i][I_TYPE]});
-			//printf("%d ", item_vec.second[i][I_LAYER]);
-		}
-	}
-
-
-	for (i = 0; i < migopt.nr_tiers; i++) {
-		printf("Tier %d: ", i);
-		for (int j = 0; j < migopt.nr_period; j++) {
-			printf("%d(%d) ", j, tier_size_per_period[j][i]);
-		}
-		printf("\n");
-	}
-
-
-
-	printf("cache_sched\n");
-	ofstream writeFile(migopt.alloc_file);
-	int alloced_item = 0;
-	for (i = 0; i < migopt.cache_sched.size(); i++) {
-		for (j = 0; j < migopt.nr_tiers; j++) {
-			for (auto item : migopt.cache_sched[i][j]) {
-				// time, addr, layer, type
-				writeFile << "A " << i * migopt.mig_period << " " << item.first << " " << j << " " << item.second << "\n";
-				if (item.second == 0) {
-					nr_alloc[j]++;
-					alloced_item++;
-				}
-				//printf("addr: %ld, type: %d\n", item.first, item.second);
-			}
-		}
-	}
-	fflush(stdout);
-	writeFile.close();
-}
-
+///////////////////////////////////////////////////////
 // print functions
+void print_item_sched() {
+	int nr_period = my_migopt.nr_traces / my_migopt.mig_period;
+	for (auto &item_vec : my_migopt.item_sched) {
+		printf("Addr %lx: ", item_vec.first);
+		for (int i = 0; i < nr_period; i++) {
+			printf("%d ", item_vec.second[i]);
+		}
+		printf("\n");
+	}
+}
 
 static inline void print_edge(struct edge &e) {
 	printf("start: %d, next: %d, cap: %d, cost: %d, flow: %d, type: %d, associated_tier: %d\n", e.start, e.next, e.cap, e.cost, e.flow, e.type, e.associated_tier);

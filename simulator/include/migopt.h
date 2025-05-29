@@ -24,73 +24,6 @@ using namespace std;
 
 #define MCMF_SAMPLE 10000LL
 
-#define NUM_META_L 9
-#define BASE_OFFSET NUM_META_L
-#define L_DEMO 1
-#define L_DEMO_BAR 2
-#define L_PROMO 3
-#define L_PROMO_BAR 4
-#define L_ALLOC 5
-#define L_END 6
-#define L_AGGR 7
-#define L_AGGR_BAR 8
-
-#define N_NOP -1
-#define N_META 0
-#define N_DEMO 1
-#define N_DEMO_BAR 2
-#define N_PROMO 3
-#define N_PROMO_BAR 4
-#define N_ALLOC 5
-#define N_END 6
-#define N_AGGR 7
-#define N_AGGR_BAR 8
-#define N_ACCESS NUM_META_L
-
-//#define N_REG 0
-//#define N_SOURCE 1
-//#define N_SINK 2
-//#define N_CHOKE 3
-//#define N_AGGR 4
-//#define N_BAR 5
-//#define N_END 6
-//#define N_DEMO 7
-//#define N_PROMO 8
-
-//#define E_CHOKE 0
-#define E_EVICTION 0
-#define E_CACHING 1
-#define E_LOAD 2
-#define E_STORE 3
-#define E_SINK 4
-#define E_REV 5
-
-#define E_AGGR 6
-#define E_BAR 7
-#define E_HIT 8
-#define E_DEMO 9
-#define E_PROMO 10
-#define E_MIG 11
-#define E_END 12
-#define E_DEMO_NEXT 13
-#define E_PROMO_ALLOC 14
-#define E_CHOKE 15
-#define E_ALLOC 16
-#define E_DEMO_BAR 17
-#define E_PROMO_BAR 18
-#define E_AGGR_BAR 19
-#define E_DEMO_END 20
-
-#define L_DEMO 1
-#define L_DEMO_BAR 2
-#define L_PROMO 3
-#define L_PROMO_BAR 4
-#define L_ALLOC 5
-#define L_END 6
-#define L_AGGR 7
-#define L_AGGR_BAR 8
-
-
 enum layer_type {
 	LAYER_ACCESS = -1, // Access layer, used for the access trace
 	LAYER_DEF_META = 0,
@@ -142,20 +75,6 @@ enum edge_type {
 	NUM_EDGE_TYPES
 };
 
-#define NR_ITEM_SCHED 2
-#define I_LAYER 0
-#define I_TYPE 1
-
-#define FAULT_OVERHEAD 2000
-
-struct mcmf_stat {
-	uint64_t nr_accesses;
-	uint64_t nr_loads;
-	uint64_t nr_stores;
-	uint64_t nr_promo;
-	uint64_t nr_demo;
-};
-
 struct edge {
 	int start;
 	int next; // target
@@ -199,13 +118,11 @@ struct edge {
 };
 
 struct node {
-	int _index;
+	int _index; // used in "rgraph"
 	struct trace_req req;
-	enum layer_type layer_type;
 	enum node_type ntype;
-	vector<struct edge> *adj;
-	vector<edge*> connected_arcs_;
-	//std::unordered_map<int, struct edge> *adj;
+	vector<struct edge> *adj; // used in "nodes"
+	vector<edge*> connected_arcs_; // used in "rgraph"
 };
 
 struct SuccessiveShortestPathFlowNetwork {
@@ -393,7 +310,7 @@ struct migopt {
 	int nr_traces;
 	int nr_tiers;
 	int nr_nodes;
-	int do_migopt;
+	int mode;
 	int mig_period;
 	int mig_traffic;
 	int tier_cap[MAX_NR_TIERS];
@@ -412,44 +329,24 @@ struct migopt {
 	int nr_stores[MAX_NR_TIERS];
 	int nr_accesses[MAX_NR_TIERS];
 
+	// these two are used for the graph generation
 	struct node *nodes;
 	struct SuccessiveShortestPathFlowNetwork rgraph;
 
-	int *prev;
-
-	unordered_map<uint64_t, int> prev_accesses;
-	unordered_map<uint64_t, vector<int>> total_accesses;
-	unordered_map<int, vector<int>> total_inter_ref;
-
-	int cur;
-	struct mcmf_stat stats[MAX_NR_TIERS];
-	struct mcmf_stat g_stat;
-	int nr_items;
-	int nr_period;
-	char *alloc_file;
-
-	// for the cache schedule
-	vector<vector<unordered_map<uint64_t,int>>> cache_sched;
-
 	// layer, type (-1: unknown, 0: ALLOC, 1: PROMO, 2: HIT, 3: DEMO), local accesses, initial alloc time, local alloc time, reuse distance, inter ref
 	unordered_map<uint64_t,vector<vector<int>>> item_sched;
-
-	unordered_set<uint64_t> g_first;
-	vector<int> reuse_dist;
-	std::list<uint64_t> lru;
-
 };
 
 void init_migopt(struct sim_cfg &scfg);
 void destroy_migopt(void);
-void do_migopt(void);
-void migopt_generate_graph(uint64_t addr, enum req_type type);
-void migopt_generate_rgraph(uint64_t addr, enum req_type type);
-uint64_t migopt_do_optimal(void);
-void print_migopt();
-void migopt_analysis_graph(int iter);
-void migopt_print_cache_sched();
 void migopt_add_trace(struct trace_req &t);
+void do_migopt(void);
+
+void build_migopt_graph();
+void generate_rgraph(uint64_t addr, enum req_type type);
+void fill_item_sched(int iter);
+void print_migopt_sched();
+void print_migopt();
 
 
 #endif
