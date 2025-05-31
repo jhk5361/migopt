@@ -637,7 +637,6 @@ void fill_item_sched(int iter) {
 	int nr_period = get_nr_period();
 
 	for (int i = 1; i <= my_migopt.nr_traces; i++) {
-
 		idx = get_nidx(LAYER_TIER_CHOKE, idx);
 		cur = &my_migopt.rgraph.nodes_[idx];
 
@@ -654,7 +653,7 @@ void fill_item_sched(int iter) {
 			// the baseline tier is the bottom tier
 			if (g_first.find(addr) == g_first.end()) {
 				g_first.insert(addr);
-				my_migopt.item_sched.insert({addr, vector<int>(nr_period, -1)});	
+				my_migopt.item_sched.insert({addr, vector<int>(nr_period, INVALID)});	
 				update_item_sched(addr, period, my_migopt.bottom_tier);
 			}
 
@@ -798,7 +797,6 @@ vector<unordered_map<uint64_t, int>> get_remain_pages_in_bottom_tier() {
 
 void move_pages_in_bottom_tier(vector<unordered_map<uint64_t, int>> &remain_pages, vector<vector<int>> &tier_size_per_period) {
 	int nr_period = get_nr_period();
-	vector<unordered_map<uint64_t, int>> moving_pages(nr_period, unordered_map<uint64_t, int>());
 
 	for (int i = nr_period - 1; i >= 0; i--) {
 		if (remain_pages[i].empty()) continue;
@@ -815,9 +813,9 @@ void move_pages_in_bottom_tier(vector<unordered_map<uint64_t, int>> &remain_page
 		// if there is not enough room in the bottom tier, we need to move some pages
 		// we can only move pages that are demoted to the bottom tier and remain there
 		// we can move at most -min_room pages from the bottom tier to the upper tiers
-		int need_to_move = std::min(int(remain_pages[i].size()), -min_room);
+		int can_move = std::min(int(remain_pages[i].size()), -min_room);
 
-		while(need_to_move--) {
+		while(can_move--) {
 			auto cand = remain_pages[i].begin();
 			int prev_tier = cand->second;
 
@@ -832,6 +830,7 @@ void move_pages_in_bottom_tier(vector<unordered_map<uint64_t, int>> &remain_page
 					}
 					remain_pages[i].erase(cand);
 					room_per_tier[dst]--; // decrease the room available in the destination tier
+					room_per_tier[my_migopt.bottom_tier]++; // increase the room available in the bottom tier
 					break;
 				}
 			}
@@ -878,7 +877,7 @@ void print_migopt_sched() {
 	vector<map<uint64_t,int>> mig_sched = vector(nr_period, map<uint64_t,int>());
 
 	for (auto &item_vec : my_migopt.item_sched) {
-		for (i = 0; i < migopt.nr_period; i++) {
+		for (i = 0; i < my_migopt.nr_period; i++) {
 			if (item_vec.second[i] != INVALID)
 				mig_sched[i][item_vec.first] = item_vec.second[i];
 		}
@@ -886,7 +885,7 @@ void print_migopt_sched() {
 
 	for (int i = 0; i < nr_period; i++) {
 		for (auto item: mig_sched[i]) {
-				writeFile << "A " << i * my_an->mig_period << " " << item.first << " " << item.second << " " << 0 << "\n";
+				writeFile << "A " << i * my_migopt->mig_period << " " << item.first << " " << item.second << " " << 0 << "\n";
 		}
 	}
 
@@ -900,10 +899,10 @@ void do_migopt() {
 	generate_rgraph();
 
 	uint64_t sum_cost = 0, sum_flow = 0;
-	for (int iter = 0; iter < migopt.nr_tiers - 1; iter++) {
+	for (int iter = 0; iter < my_migopt.nr_tiers - 1; iter++) {
 		printf("ITER %d\n", i);
-		update_source_cap(migopt.tier_cap[iter], 0);
-		auto result = migopt.rgraph.min_cost_max_flow(migopt.source_nidx, migopt.sink_nidx);
+		update_source_cap(my_migopt.tier_cap[iter], 0);
+		auto result = my_migopt.rgraph.min_cost_max_flow(my_migopt.source_nidx, my_migopt.sink_nidx);
 		printf("Estimated min cost: %d, max flow: %d\n", result[0], result[1]);
 		fill_item_sched(iter);
 		post_process_item_sched()
