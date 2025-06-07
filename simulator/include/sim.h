@@ -39,6 +39,7 @@ struct sim_cfg {
 	char trace_file[200]; // input trace file
 	char sampled_file[200]; // sampled trace file
 	char sched_file[200]; // output schedule file
+	char analysis_input_file[200]; // output schedule file
 
 	uint64_t nr_org_pages; // number of original pages
 	uint64_t nr_org_traces; // number of original traces

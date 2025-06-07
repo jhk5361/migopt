@@ -44,7 +44,7 @@ void init_mtm(struct sim_cfg &scfg) {
 	my_mtm->nr_tiers = scfg.nr_tiers;
 	my_mtm->mig_period = scfg.mig_period;
 	my_mtm->mig_traffic = scfg.mig_traffic == -1 ? 1000 : scfg.mig_traffic;
-	my_mtm->mode = scfg.do_at;
+	my_mtm->mode = scfg.do_mtm;
 	my_mtm->sched_file = scfg.sched_file;
 
 	for(int i = 0; i < scfg.nr_tiers; i++) {
@@ -373,7 +373,7 @@ static void clear_mtm() {
 	my_mtm->hist.clear();
 }
 
-void print_mtm_sched () {
+string print_mtm_sched () {
 	// set sched file name
 	string aorder = "";
 	for (int i = 0; i < my_mtm->nr_tiers; i++)
@@ -408,6 +408,8 @@ void print_mtm_sched () {
 
 	fflush(stdout);
 	writeFile.close();
+
+	return output_file;
 }
 
 void print_mtm() {
@@ -443,18 +445,23 @@ void print_mtm() {
 		cout << endl;
 	}
 
-	print_mtm_sched();
-
 	return;
 }
 
-void do_mtm() {
+string do_mtm() {
+	string output_file;
 	vector<vector<int>> alloc_orders = {{0,2,1,3}, {1,0,2,3}, {2,0,1,3}, {0,1,2,3}};
 
 	for (int alloc_id = 0; alloc_id < alloc_orders.size(); alloc_id++) {
 		 __do_mtm(alloc_orders[alloc_id]);
 
 		print_mtm();
+		auto str = print_mtm_sched();
+		if (alloc_id == 2) {
+			output_file = str;
+		}
 		clear_mtm();
 	}
+
+	return output_file;
 }

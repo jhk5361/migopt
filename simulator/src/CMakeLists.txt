@@ -5,7 +5,7 @@ project(
   LANGUAGES CXX
 )
 
-file(GLOB SOURCES "*.cpp")
+file(GLOB SOURCES main.cpp analysis.cpp)
 
 find_package(libconfig REQUIRED)
 
@@ -13,9 +13,10 @@ find_package(libconfig REQUIRED)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -g -O2")
 
 add_subdirectory(pol)
+add_subdirectory(opt)
 
 
-set(LIBRARIES pol)
+set(LIBRARIES pol opt)
 
 foreach(LIBRARY ${LIBRARIES})
   set(LIB_OBJS ${LIB_OBJS} $<TARGET_OBJECTS:${LIBRARY}>)

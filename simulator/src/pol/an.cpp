@@ -496,7 +496,7 @@ static void clear_an() {
 	my_an->lru_list->clear();
 }
 
-void print_an_sched () {
+string print_an_sched () {
 	// set sched file name
 	string aorder = "";
 	for (int i = 0; i < my_an->nr_tiers; i++)
@@ -531,6 +531,8 @@ void print_an_sched () {
 
 	fflush(stdout);
 	writeFile.close();
+
+	return output_file;
 }
 
 void print_an() {
@@ -566,18 +568,23 @@ void print_an() {
 		cout << endl;
 	}
 
-	print_an_sched();
-
 	return;
 }
 
-void do_an() {
+string do_an() {
+	string output_file;
 	vector<vector<int>> alloc_orders = {{0,2,1,3}, {1,0,2,3}, {2,0,1,3}, {0,1,2,3}};
 
 	for (int alloc_id = 0; alloc_id < alloc_orders.size(); alloc_id++) {
 		 __do_an(alloc_orders[alloc_id]);
 
 		print_an();
+		auto str = print_an_sched();
+		if (alloc_id == 0) {
+			output_file = str;
+		}
 		clear_an();
 	}
+
+	return output_file;
 }

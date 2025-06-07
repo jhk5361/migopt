@@ -16,21 +16,10 @@
 #include <unordered_set>
 #include <string>
 #include <list>
-#include "cxl_tm.h"
+#include "sim.h"
 using namespace std;
 
-// 0: MIGOPT
-// 1: LFU
-// 2: LFU (local)
-// 3: LFU (accum)
-// 4: reuse
-// 5: reuse (local)
-// 6: reuse (accum)
-// 7: inter-ref
-// 8: inter-ref (local)
-// 9: inter-ref (accum)
-// 10: LRU
-#define NR_COMP 11
+#define NR_COMP 1
 
 #define COOLING_PERIOD 3
 
@@ -88,24 +77,6 @@ using namespace std;
 #define E_CHOCK 15
 #define E_ALLOC 16
 
-#if 0
-#define NR_ITEM_SCHED 11
-#define I_LAYER_OPT 0
-#define I_LAYER_FREQ 0
-#define I_LAYER_OPT 0
-#define I_LAYER_OPT 0
-#define I_TYPE 1
-#define I_E_CNT_GLO 2
-#define I_E_CNT_LOC 3
-#define I_E_CNT_ACC 4
-#define I_E_REU_GLO 5
-#define I_E_REU_LOC 6
-#define I_E_REU_ACC 7
-#define I_E_INT_GLO 8
-#define I_E_INT_LOC 9
-#define I_E_INT ACC 10
-#endif
-
 #define NR_ITEM_STAT 9
 #define S_CNT_GLO 0
 #define S_CNT_LOC 1
@@ -156,7 +127,7 @@ struct anode {
 	int index_;
 	int layer;
 	uint64_t addr;
-	enum req_type type;
+	enum trace_type type;
 	int node_type;
 	int reuse_dist;
 	int inter_ref;
@@ -329,12 +300,11 @@ struct analysis {
 
 };
 
-void init_analysis (char *alloc_file, int nr_traces, int period, int mig_traffic, int nr_tiers, int bar_ratio, int *nr_cache_sizes, int *lat_loads, int *lat_stores, int *lat_4KB_reads, int *lat_4KB_writes);
+void init_analysis(struct sim_cfg &scfg);
 void destroy_analysis(void);
-void analysis_generate_graph(uint64_t addr, enum req_type type);
+void analysis_add_trace(struct trace_req &t);
+void do_analysis(const char *sched_file);
 void print_analysis();
-void analysis_analysis_graph(int iter);
-void analysis_do(void);
 
 
 #endif

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <map>
 #include <list>
+#include <string>
 #include "sim.h"
 using namespace std;
 
@@ -53,7 +54,7 @@ struct at {
 
 void at_add_trace(struct trace_req &t);
 void init_at(struct sim_cfg &scfg);
-void do_at();
+string do_at();
 void destroy_at();
 
 #endif

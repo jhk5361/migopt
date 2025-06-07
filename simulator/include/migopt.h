@@ -20,7 +20,7 @@
 using namespace std;
 
 #define INVALID -1
-#define INVALID_REQ {INVALID, OTHERS, INVALID}
+#define INVALID_REQ {(uint64_t)INVALID, OTHERS, INVALID}
 
 #define MCMF_SAMPLE 10000LL
 
@@ -54,7 +54,7 @@ enum node_type {
 	NODE_PROMO = 11, // LAYER_PROMO
 	NODE_PROMO_CHOKE = 12, // LAYER_PROMO_CHOKE
 	NUM_NODE_TYPES
-}
+};
 
 enum edge_type {
 	EDGE_CAP_CHOKE = 0,
@@ -134,11 +134,11 @@ struct SuccessiveShortestPathFlowNetwork {
 
 	void print_rnode(int idx) {
 		struct node cur = nodes_[idx];
-		printf("Node[%d]: addr: %lu, type: %d, tier: %d, ntype: %d, %ld edges\n", idx, cur.t.addr, cur.t.type, cur.t.tier, cur.ntype, cur.connected_arcs_.size());
+		printf("Node[%d]: addr: %lu, type: %d, tier: %d, ntype: %d, %ld edges\n", idx, cur.req.addr, cur.req.type, cur.req.tier, cur.ntype, cur.connected_arcs_.size());
 	}
 
-    void add_node(struct trace_req t, int ntype) {
-        nodes_.push_back({int(nodes_.size()), t, ntype, NULL, {}});
+    void add_node(struct trace_req t, enum node_type ntype) {
+        nodes_.push_back({(int)nodes_.size(), t, ntype, NULL, {}});
     }
 
     int add_arc(int start, int end, int cap, int cost, int flow, enum edge_type type, int associated_tier) {
@@ -304,7 +304,7 @@ struct migopt_trace_req {
 	bool is_p_last;
 	int prev_idx; // previous access index, used for checking if the access is a reuse
 	int next_idx; // next trace index
-}
+};
 
 struct migopt {
 	int nr_traces;
@@ -334,18 +334,16 @@ struct migopt {
 	struct SuccessiveShortestPathFlowNetwork rgraph;
 
 	// layer, type (-1: unknown, 0: ALLOC, 1: PROMO, 2: HIT, 3: DEMO), local accesses, initial alloc time, local alloc time, reuse distance, inter ref
-	unordered_map<uint64_t,vector<vector<int>>> item_sched;
+	unordered_map<uint64_t,vector<int>> item_sched;
 };
 
 void init_migopt(struct sim_cfg &scfg);
 void destroy_migopt(void);
 void migopt_add_trace(struct trace_req &t);
-void do_migopt(void);
+string do_migopt(void);
 
 void build_migopt_graph();
-void generate_rgraph(uint64_t addr, enum req_type type);
 void fill_item_sched(int iter);
-void print_migopt_sched();
 void print_migopt();
 
 

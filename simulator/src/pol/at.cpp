@@ -500,7 +500,7 @@ static void clear_at() {
 	my_at->lru_list->clear();
 }
 
-void print_at_sched () {
+string print_at_sched () {
 	// set sched file name
 	string aorder = "";
 	for (int i = 0; i < my_at->nr_tiers; i++)
@@ -535,6 +535,8 @@ void print_at_sched () {
 
 	fflush(stdout);
 	writeFile.close();
+
+	return output_file;
 }
 
 void print_at() {
@@ -570,18 +572,23 @@ void print_at() {
 		cout << endl;
 	}
 
-	print_at_sched();
-
 	return;
 }
 
-void do_at() {
+string do_at() {
+	string output_file;
 	vector<vector<int>> alloc_orders = {{0,2,1,3}, {1,0,2,3}, {2,0,1,3}, {0,1,2,3}};
 
 	for (int alloc_id = 0; alloc_id < alloc_orders.size(); alloc_id++) {
 		 __do_at(alloc_orders[alloc_id]);
 
 		print_at();
+		auto str = print_at_sched();
+		if (alloc_id == 0) {
+			output_file = str;
+		}
 		clear_at();
 	}
+
+	return output_file;
 }

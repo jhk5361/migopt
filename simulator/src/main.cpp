@@ -21,8 +21,9 @@
 #include "an.h"
 #include "at.h"
 #include "mtm.h"
+#include "migopt.h"
+#include "analysis.h"
 //#include "mcmf.h" // for testing
-//#include "analysis.h"
 using namespace std;
 
 enum trace_type get_type(string &str) {
@@ -95,6 +96,7 @@ void print_conf(struct sim_cfg &scfg) {
 	cout << "Trace File: " << scfg.trace_file << endl;
 	cout << "Sampled File: " << scfg.sampled_file << endl;
 	cout << "Sched File: " << scfg.sched_file << endl;
+	cout << "Analysis Input File: " << scfg.analysis_input_file << endl;
 	cout << "Number of Original Pages: " << scfg.nr_org_pages << endl;
 	cout << "Number of Original Traces: " << scfg.nr_org_traces << endl;
 	cout << "Trace Sampling Ratio: " << scfg.trace_sampling_ratio << endl;
@@ -164,8 +166,8 @@ void get_sim_conf(const char *cfg_file, struct sim_cfg &scfg) {
 		memcpy(scfg.trace_file, str, strlen(str));
 	if (config_lookup_int(&cfg, "trace_sampling_ratio", &intval))
 		scfg.trace_sampling_ratio = intval;
-	if(config_lookup_string(&cfg, "sched_file", &str))
-		memcpy(scfg.sched_file, str, strlen(str));
+	if(config_lookup_string(&cfg, "analysis_input_file", &str))
+		memcpy(scfg.analysis_input_file, str, strlen(str));
 
 	string dot_removed_file_str = scfg.trace_file;
 	// Remove the file extension (.) from the trace file name
@@ -207,6 +209,14 @@ void get_sim_conf(const char *cfg_file, struct sim_cfg &scfg) {
 		}
 	}
 
+	// get mig_period, mig_traffic, and mig_overhead
+	if(config_lookup_int(&cfg, "mig_period", &intval))
+		scfg.mig_period = intval;
+	if(config_lookup_int(&cfg, "mig_traffic", &intval))
+		scfg.mig_traffic = intval;
+	if(config_lookup_int(&cfg, "mig_overhead", &intval))
+		scfg.mig_overhead = intval;
+
 	setting = config_lookup(&cfg, "tier_lat_loads");
 	if (setting != NULL) {
 		int count = config_setting_length(setting);
@@ -240,8 +250,8 @@ void get_sim_conf(const char *cfg_file, struct sim_cfg &scfg) {
 		}
 		for (int i = 0; i < count; i++) {
 			config_setting_t *lat = config_setting_get_elem(setting, i); 
-			scfg.tier_lat_4KB_reads[i] =  config_setting_get_int(lat);
-			scfg.tier_lat_4KB_reads[i] *= scfg.mig_overhead / 10000;
+			scfg.tier_lat_4KB_reads[i] = config_setting_get_int(lat);
+			scfg.tier_lat_4KB_reads[i] = scfg.tier_lat_4KB_reads[i] * scfg.mig_overhead / 10000;
 		}
 	}
 	setting = config_lookup(&cfg, "tier_lat_4KB_writes");
@@ -253,18 +263,10 @@ void get_sim_conf(const char *cfg_file, struct sim_cfg &scfg) {
 		}
 		for (int i = 0; i < count; i++) {
 			config_setting_t *lat = config_setting_get_elem(setting, i); 
-			scfg.tier_lat_4KB_writes[i] =  config_setting_get_int(lat);
-			scfg.tier_lat_4KB_writes[i] *= scfg.mig_overhead / 10000;
+			scfg.tier_lat_4KB_writes[i] = config_setting_get_int(lat);
+			scfg.tier_lat_4KB_writes[i] = scfg.tier_lat_4KB_writes[i] * scfg.mig_overhead / 10000;
 		}
 	}
-
-	// get mig_period, mig_traffic, and mig_overhead
-	if(config_lookup_int(&cfg, "mig_period", &intval))
-		scfg.mig_period = intval;
-	if(config_lookup_int(&cfg, "mig_traffic", &intval))
-		scfg.mig_traffic = intval;
-	if(config_lookup_int(&cfg, "mig_overhead", &intval))
-		scfg.mig_overhead = intval;
 
 	// get simulating actions (e.g., do_an, do_at, do_mtm)
 	if(config_lookup_int(&cfg, "do_an", &intval))
@@ -455,6 +457,8 @@ void init_sim(struct sim_cfg &scfg) {
 		init_mtm(scfg);
 	if (scfg.do_migopt > 0)
 		init_migopt(scfg);
+	if (scfg.do_analysis > 0)
+		init_analysis(scfg);
 }
 
 void process_trace(struct trace_req &trace, struct sim_cfg &scfg) {
@@ -469,6 +473,8 @@ void process_trace(struct trace_req &trace, struct sim_cfg &scfg) {
 				mtm_add_trace(trace);
 			if (scfg.do_migopt > 0)
 				migopt_add_trace(trace);
+			if (scfg.do_analysis > 0)
+				analysis_add_trace(trace);
 			break;
 		default:
 			break;
@@ -482,14 +488,40 @@ void do_sim(vector<struct trace_req> &traces, struct sim_cfg &scfg) {
 		process_trace(trace, scfg);
 	}
 
-	if (scfg.do_an > 0)
-		do_an();
-	if (scfg.do_at > 0)
-		do_at();
-	if (scfg.do_mtm > 0)
-		do_mtm();
-	if (scfg.do_migopt > 0)
-		do_migopt();
+	string output_file;
+
+	if (scfg.do_an > 0) {
+		output_file = do_an();
+		if (scfg.do_analysis > 0) {
+			do_analysis(output_file.c_str());
+		}
+	}
+
+	if (scfg.do_at > 0) {
+		output_file = do_at();
+		if (scfg.do_analysis > 0) {
+			do_analysis(output_file.c_str());
+		}
+	}
+
+	if (scfg.do_mtm > 0) {
+		output_file = do_mtm();
+		if (scfg.do_analysis > 0) {
+			do_analysis(output_file.c_str());
+		}
+	}
+
+	if (scfg.do_migopt > 0) {
+		output_file = do_migopt();
+		if (scfg.do_analysis > 0) {
+			do_analysis(output_file.c_str());
+		}
+	}
+
+	if (scfg.analysis_input_file[0] != '\0' && scfg.do_analysis > 0) {
+		// If the analysis input file is specified, we will use it to do analysis
+		do_analysis(scfg.analysis_input_file);
+	}
 }
 
 void destroy_sim(struct sim_cfg &scfg) {
@@ -501,6 +533,8 @@ void destroy_sim(struct sim_cfg &scfg) {
 		destroy_mtm();
 	if (scfg.do_migopt > 0)
 		destroy_migopt();
+	if (scfg.do_analysis > 0)
+		destroy_analysis();
 }
 
 void print_sim(struct sim_stat &sstat) {
@@ -536,157 +570,5 @@ int main(int argc, char **argv) {
 
 	destroy_sim(scfg);
 
-#if 0
-	if (scfg.nr_pages > 0) {
-		scfg.mcmf = scfg.nr_traces;
-		if (scfg.mcmf_period == -1) scfg.mcmf_period = scfg.mig_rate * scfg.trace_sample / TRACE_SAMPLE;
-
-		printf("\nnr_traces: %d, # of org pages: %ld\n", scfg.nr_traces, scfg.nr_pages);
-	} else {
-		if (scfg.trace_sample != 10000) {
-			int nr_sampled = 0;
-			uint64_t addr;
-			unordered_set<uint64_t> sampled_addr;
-			while (getline(input_file, cur_str)) {
-				if ((++lines % 100000) == 0){
-					fprintf(stderr, "\r%lu processed...", lines);
-				}
-				rtype = get_type(cur_str);
-				switch (rtype) {
-					case LOAD:
-					case STORE:
-						addr = get_mem_addr(cur_str);
-						if (get_hash(addr/PAGE_SIZE, scfg.trace_sample)) {
-							nr_sampled++;
-							sampled_addr.insert(addr/PAGE_SIZE);
-							printf("%s\n", cur_str.c_str());
-						}
-						cur_time++;
-						break;
-					case OTHERS:
-						break;
-					default:
-						break;
-				}
-			}
-			input_file.clear();
-			input_file.seekg(0);
-			cout << endl;
-
-			//scfg.mcmf = min(scfg.mcmf, nr_sampled);
-			scfg.mcmf = nr_sampled;
-			if (scfg.mcmf_period == -1) scfg.mcmf_period = scfg.mig_rate * scfg.trace_sample / TRACE_SAMPLE;
-
-			scfg.nr_pages = sampled_addr.size();
-			scfg.mig_rate = scfg.mcmf_period;
-			scfg.mon_rate = scfg.mig_rate / 10;
-			printf("\nnr_traces: %lu, nr_sampled: %d, # of org pages: %ld, # of sampled addr: %ld, period: %d\n", cur_time - 1, nr_sampled, org_pages.size(), sampled_addr.size(), scfg.mcmf_period);
-			cur_time = 1;
-			lines = 0;
-			fflush(stdout);
-		}
-	}
-
-	if (scfg.mcmf_type != -1 && scfg.mcmf)
-		if (scfg.mcmf_type == MCMF_MIGOPT) {
-			init_migopt (scfg.mcmf_type, scfg.mcmf, scfg.mcmf_period, scfg.mcmf_mig_traffic, scfg.nr_tiers, scfg.nr_cache_pages, scfg.lat_loads, scfg.lat_stores, scfg.lat_4KB_reads, scfg.lat_4KB_writes, scfg.sched_file); // for testing
-		} else {
-			init_chopt (scfg.mcmf_type, scfg.mcmf, scfg.nr_tiers, scfg.nr_cache_pages, scfg.lat_loads, scfg.lat_stores, scfg.lat_4KB_reads, scfg.lat_4KB_writes); // for testing
-		}
-
-	if (scfg.do_analysis > 0) {
-		printf("nr_trace: %d\n", scfg.nr_traces);
-		init_analysis(scfg.sched_file, scfg.nr_traces, scfg.mig_rate, scfg.mcmf_mig_traffic, scfg.nr_tiers, scfg.bar_ratio, scfg.nr_cache_pages, scfg.lat_loads, scfg.lat_stores, scfg.lat_4KB_reads, scfg.lat_4KB_writes);
-	}
-
-	if (scfg.do_mtm > 0) {
-		init_mtm(scfg.nr_pages, scfg.nr_tiers, NULL, scfg.ratio, scfg.lat_loads, scfg.lat_stores, scfg.lat_4KB_reads, scfg.lat_4KB_writes, scfg.mcmf_period, scfg.mcmf_mig_traffic, scfg.do_mtm, scfg.sched_file);
-	}
-
-	if (scfg.do_an > 0) {
-		init_an(scfg.nr_pages, scfg.nr_tiers, NULL, scfg.ratio, scfg.lat_loads, scfg.lat_stores, scfg.lat_4KB_reads, scfg.lat_4KB_writes, scfg.mcmf_period, scfg.mcmf_mig_traffic, scfg.do_an, scfg.sched_file);
-	}
-
-	if (scfg.do_at > 0) {
-		init_at(scfg.nr_pages, scfg.nr_tiers, NULL, scfg.ratio, scfg.lat_loads, scfg.lat_stores, scfg.lat_4KB_reads, scfg.lat_4KB_writes, scfg.mcmf_period, scfg.mcmf_mig_traffic, scfg.do_at, scfg.sched_file);
-	}
-	
-	while (getline(input_file, cur_str)) {
-		if ((++lines % 100000) == 0){
-			fprintf(stderr, "\r%lu processed...", lines);
-		}
-
-		//if ((lines % 10000000) == 0)
-		//	print_stat();
-		rtype = get_type(cur_str);
-		switch (rtype) {
-			case LOAD:
-			case STORE:
-
-				if (!get_hash(get_mem_addr(cur_str)/PAGE_SIZE, scfg.trace_sample)) {
-					//printf("%s\n", cur_str.c_str());
-					continue;
-				}
-
-				///*
-				// for testing
-				if (scfg.mcmf_type != -1 && scfg.mcmf) {
-					if (scfg.mcmf_type == MCMF_MIGOPT) {
-						migopt_generate_graph(mreq.vaddr, mreq.type);
-					} else {
-						chopt_generate_graph(mreq.vaddr, mreq.type);
-					}
-				}
-
-				if (scfg.do_analysis > 0) {
-					analysis_generate_graph(mreq.vaddr, mreq.type);
-				}
-
-
-				cur_time++;
-				break;
-			case OTHERS:
-				break;
-			default:
-				break;
-		}
-
-		tstat.nr_trace[rtype]++;
-
-		if (scfg.mcmf_type != -1 && cur_time > scfg.mcmf && scfg.trace_sample == 10000)
-			break;
-	}
-
-	if (scfg.mcmf_type != -1 && scfg.mcmf) {
-		if (scfg.mcmf_type == MCMF_MIGOPT) {
-			migopt_do_optimal();
-			//migopt_analysis_graph();
-		} else {
-			chopt_do_optimal();
-		}
-		//print_chopt();
-		//print_chopt();
-	}
-
-	if (scfg.do_mtm > 0) {
-		do_mtm();
-	}
-
-	if (scfg.do_an > 0) {
-		do_an();
-	}
-
-	if (scfg.do_at > 0) {
-		do_at();
-	}
-
-	if (scfg.do_analysis > 0) {
-		analysis_do();
-	}
-
-	cout << endl;
-	print_stat();
-#endif
-	
 	return 0;
 }

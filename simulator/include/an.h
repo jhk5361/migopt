@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <map>
 #include <list>
+#include <string>
 #include "sim.h"
 using namespace std;
 
@@ -56,7 +57,7 @@ struct an {
 
 void an_add_trace(struct trace_req &t);
 void init_an(struct sim_cfg &scfg);
-void do_an();
+string do_an();
 void destroy_an();
 
 #endif

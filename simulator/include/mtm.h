@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <map>
+#include <string>
 #include "sim.h"
 using namespace std;
 
@@ -53,7 +54,7 @@ struct mtm {
 
 void mtm_add_trace(struct trace_req &t); 
 void init_mtm(struct sim_cfg &scfg);
-void do_mtm();
+string do_mtm();
 void destroy_mtm();
 
 #endif
